@@ -1,7 +1,10 @@
-from __future__ import print_function
 from ortools.sat.python import cp_model
 import pandas as pd
 import xlrd
+from Professor import Professor
+from Section import Section
+
+Max_Unit_Per_Sem = 12
 
 
 # return a list containing rows from DataFrame df, start from start_index in each row
@@ -12,10 +15,17 @@ def get_rows(df, start_index=0):
     return data
 
 
+def print_info(l):
+    for s in l:
+        s.info()
+        print('-----------------------------------------------------------')
 
-def main():
+
+
+# read input, separate classes into sections
+# check for infeasible situation, and store info into objects
+def read_input(input):
     input_file = 'Testing data.xlsx'
-
     # get data from excel
     CanTeach = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
     Course = pd.read_excel(input_file, sheet_name='Course', index_col=0)
@@ -27,6 +37,11 @@ def main():
     sem_name.remove('Unit')
     sem_name.remove('UnitSum')
 
+    # infeasible if no prof can teach one class
+    for col in class_name:
+        if sum(CanTeach[col].tolist()) == 0:
+            exit('No professor can teach ' + col)
+
     prof_max_credits = Prof['MaxUnit'].tolist()
     class_sec_num = get_rows(Course, 2)
     # [[(class 0)section number in sem 0, section number in sem 1],
@@ -36,6 +51,12 @@ def main():
     # [[(prof 0) class 0, class 1, class 2,...], [(prof 2) class 0 ,...],...]
     class_prefer = get_rows(Prefer)
 
+    return class_name, class_credits, class_sec_num, prof_name, \
+           prof_max_credits, class_can_teach, class_prefer, sem_name
+
+
+def creat_sections(class_name, class_credits, class_sec_num, prof_name,
+                   prof_max_credits, class_can_teach, class_prefer, sem_name):
     num_prof = len(prof_name)
     num_class = len(class_name)
     num_sem = len(sem_name)
@@ -78,14 +99,11 @@ def main():
         sec_can_teach.append(can_teach)
         sec_prefer.append(prefer)
 
-    num_sec = len(sec_name)
-    all_secs = range(num_sec)
-
     # check for infeasible situations
     if sum(prof_max_credits) < sum(sec_credits):
         exit('Professor can not provide enough number of units')
 
-    for x in all_secs:
+    for x in range(len(sec_name)):
         assigned = False
         for sem in all_sems:
             if sec_sem[x][sem] == 1:
@@ -93,9 +111,36 @@ def main():
         if not assigned:
             exit(sec_name[x] + ' is not assigned to a semester')
 
-    for col in class_name:
-        if sum(CanTeach[col].tolist()) == 0:
-            exit('No professor can teach ' + col)
+    return sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer
+
+
+
+def create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
+                   prof_name, prof_max_credits):
+    all_secs = range(len(sec_name))
+    all_profs = range(len(prof_name))
+    # put the information into section and professor objects
+    sections = []
+    for x in all_secs:
+        c = Section(sec_name[x], sec_credits[x], sec_sem[x])
+        sections.append(c)
+
+    professors = []
+    for x in all_profs:
+        can_teach = {}
+        prefer = {}
+        for y in all_secs:
+            can_teach[sections[y]] = sec_can_teach[x][y]
+        for y in all_secs:
+            prefer[sections[y]] = sec_prefer[x][y]
+        p = Professor(prof_name[x], prof_max_credits[x], can_teach, prefer)
+        professors.append(p)
+
+    return professors, sections
+
+
+def creat_model(professors, sections, semesters):
+    num_sec = len(sections)
 
     # Creates the model.
     model = cp_model.CpModel()
@@ -103,61 +148,71 @@ def main():
     # Creates class variables.
     # classes[(p,c,s)]: professor 'p' teaches class 'c' in semester 's'
     classes = {}
-    for p in all_profs:
-        for c in all_secs:
-            for s in all_sems:
-                classes[(p, c, s)] = model.NewBoolVar('classes_n%id%is%i' % (p, c, s))
-
+    for p in professors:
+        for c in sections:
+            for s in semesters:
+                classes[(p, c, s)] = model.NewBoolVar('classes_n%s%s%s' % (p.name, c.name, s))
 
     # hard constraints
 
     # Each class is assigned to exactly one professor.
-    for c in all_secs:
-        model.Add(sum(classes[(p, c, s)] for p in all_profs for s in all_sems) == 1)
+    for c in sections:
+        model.Add(sum(classes[(p, c, s)] for p in professors for s in semesters) == 1)
 
     # Professors cannot teach more than their max number of units
     # 12 units per semester max
-    # 4 units per semester min
-    for p in all_profs:
-        model.Add(sum(classes[(p, c, s)] * sec_credits[c] for c in all_secs for s in all_sems)
-                  <= prof_max_credits[p])
-        for s in all_sems:
-            model.Add(sum(classes[(p, c, s)] * sec_credits[c] for c in all_secs) <= 12)
-            '''model.Add(sum(classes[(p, c, s)] * sec_credits[c] for c in all_secs) >= 4)'''
+    for p in professors:
+        model.Add(sum(classes[(p, c, s)] * c.units for c in sections for s in semesters)
+                  <= p.max_units)
+        for s in semesters:
+            model.Add(sum(classes[(p, c, s)] * c.units for c in sections) <= Max_Unit_Per_Sem)
 
     # Only schedule classes that professors can teach
     # assign semesters to each class
-    model.Add(sum(classes[(p, c, s)] * sec_can_teach[p][c] for p in all_profs
-                  for c in all_secs for s in all_sems) == num_sec)
-    model.Add(sum(classes[(p, c, s)] * sec_sem[c][s] for p in all_profs
-                  for c in all_secs for s in all_sems) == num_sec)
+    model.Add(sum(classes[(p, c, s)] * p.can_teach[c] for p in professors
+                  for c in sections for s in semesters) == num_sec)
+    model.Add(sum(classes[(p, c, s)] * c.semester[semesters.index(s)] for p in professors
+                  for c in sections for s in semesters) == num_sec)
 
     # soft constraints
     # assign classes according to prof preference
-    model.Maximize(sum(classes[(p, c, s)] * sec_prefer[p][c] for p in all_profs
-                       for c in all_secs for s in all_sems))
+    model.Maximize(sum(classes[(p, c, s)] * p.preference[c] for p in professors
+                       for c in sections for s in semesters))
 
+    return model, classes
+
+
+def solve_model(model, classes, professors, sections, semesters):
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
     solver.Solve(model)
     if solver.StatusName() == 'INFEASIBLE':
         exit('INFEASIBLE')
-    for p in all_profs:
-        print('Prof', p)
-        for s in all_sems:
-            for c in all_secs:
-                if solver.Value(classes[(p, c, s)]) == 1 and sec_prefer[p][c] == 1:
-                    print('Semester', s, sec_name[c], '(requested)')
-                elif solver.Value(classes[(p, c, s)]) == 1:
-                    print('Semester', s, sec_name[c], '(not requested)')
 
-    # Statistics.
-    print()
-    print('Statistics')
-    print('This solution is ' + solver.StatusName())
-    print('  - Number of requests met = %i' % solver.ObjectiveValue())
-    print('  - wall time       : %f s' % solver.WallTime())
-    # print(solver.NumConflicts())
+    for p in professors:
+        print(p)
+        for c in sections:
+            for s in semesters:
+                if solver.Value(classes[(p, c, s)]) == 1 and p.preference[c] == 1:
+                    print('Semester', s, c.name, '(requested)')
+                elif solver.Value(classes[(p, c, s)]) == 1:
+                    print('Semester', s, c.name, '(not requested)')
+
+
+def main():
+    # switch input data order
+    input_file = 'Testing data.xlsx'
+    class_name, class_credits, class_sec_num, prof_name, \
+    prof_max_credits, class_can_teach, class_prefer, sem_name = read_input(input_file)
+
+    sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer = creat_sections \
+        (class_name, class_credits, class_sec_num, prof_name, prof_max_credits, class_can_teach, class_prefer, sem_name)
+
+    professors, sections = create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
+                   prof_name, prof_max_credits)
+
+    model, classes = creat_model(professors, sections, sem_name)
+    solve_model(model, classes, professors, sections, sem_name)
 
 
 if __name__ == '__main__':
