@@ -1,7 +1,6 @@
 
 class Section:
-    'A section of a course'
-    # section number?
+
     def __init__(self, name, units, semester):
         self.name = name
         self.units = units

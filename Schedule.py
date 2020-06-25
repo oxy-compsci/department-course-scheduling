@@ -3,6 +3,7 @@ import pandas as pd
 import xlrd
 from Professor import Professor
 from Section import Section
+from Time import Time
 
 Max_Unit_Per_Sem = 12
 
@@ -15,13 +16,7 @@ def get_rows(df, start_index=0):
     return data
 
 
-def print_info(l):
-    for s in l:
-        s.info()
-        print('-----------------------------------------------------------')
-
-
-
+# get data from excel
 # read input, separate classes into sections
 # check for infeasible situation, and store info into objects
 def read_input(input):
@@ -55,8 +50,9 @@ def read_input(input):
            prof_max_credits, class_can_teach, class_prefer, sem_name
 
 
-def creat_sections(class_name, class_credits, class_sec_num, prof_name,
-                   prof_max_credits, class_can_teach, class_prefer, sem_name):
+# separate classes into sections
+def create_sections(class_name, class_credits, class_sec_num, prof_name,
+                    prof_max_credits, class_can_teach, class_prefer, sem_name):
     num_prof = len(prof_name)
     num_class = len(class_name)
     num_sem = len(sem_name)
@@ -64,10 +60,9 @@ def creat_sections(class_name, class_credits, class_sec_num, prof_name,
     all_classes = range(num_class)
     all_sems = range(num_sem)
 
-    # separate classes into sections
+    # expand name and semester lists
     sec_name = []
     sec_sem = []
-
     for c in all_classes:
         total_sec = sum(class_sec_num[c])
         sec_count = 0
@@ -80,12 +75,14 @@ def creat_sections(class_name, class_credits, class_sec_num, prof_name,
                     sec_name.append('%s Section %i' % (class_name[c], sec_count))
                 sec_count = sec_count + 1
 
+    # expand credits lists
     sec_credits = []
     for c in all_classes:
         total_sec = sum(class_sec_num[c])
         for sec in range(total_sec):
             sec_credits.append(class_credits[c])
 
+    # expand can_teach and prefer
     sec_can_teach = []
     sec_prefer = []
     for p in all_profs:
@@ -114,12 +111,12 @@ def creat_sections(class_name, class_credits, class_sec_num, prof_name,
     return sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer
 
 
-
+# put the information into section and professor objects
+# return two lists that contains all professors and sections
 def create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
                    prof_name, prof_max_credits):
     all_secs = range(len(sec_name))
     all_profs = range(len(prof_name))
-    # put the information into section and professor objects
     sections = []
     for x in all_secs:
         c = Section(sec_name[x], sec_credits[x], sec_sem[x])
@@ -139,7 +136,8 @@ def create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
     return professors, sections
 
 
-def creat_model(professors, sections, semesters):
+# create model and add constraints
+def create_model(professors, sections, semesters):
     num_sec = len(sections)
 
     # Creates the model.
@@ -182,6 +180,8 @@ def creat_model(professors, sections, semesters):
     return model, classes
 
 
+# solve and print the schedule
+# return infos for timeslots scheduling
 def solve_model(model, classes, professors, sections, semesters):
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
@@ -189,30 +189,98 @@ def solve_model(model, classes, professors, sections, semesters):
     if solver.StatusName() == 'INFEASIBLE':
         exit('INFEASIBLE')
 
-    for p in professors:
-        print(p)
-        for c in sections:
-            for s in semesters:
-                if solver.Value(classes[(p, c, s)]) == 1 and p.preference[c] == 1:
-                    print('Semester', s, c.name, '(requested)')
-                elif solver.Value(classes[(p, c, s)]) == 1:
-                    print('Semester', s, c.name, '(not requested)')
+    scheduled_classes = []
+    prof_class = []
+    for s in semesters:
+        sem_class = []
+        prof_sem = {}
+        print(s)
+        for p in professors:
+            prof_sem[p] = []
+            print(p)
+            for c in sections:
+                if solver.Value(classes[(p, c, s)]) == 1:
+                    sem_class.append((p, c))
+                    prof_sem[p].append(c)
+                    if p.preference[c] == 1:
+                        print('Semester', s, c.name, '(requested)')
+                    else:
+                        print('Semester', s, c.name, '(not requested)')
+        scheduled_classes.append(sem_class)
+        prof_class.append(prof_sem)
+
+        print()
+
+    return scheduled_classes, prof_class
 
 
 def main():
     # switch input data order
     input_file = 'Testing data.xlsx'
     class_name, class_credits, class_sec_num, prof_name, \
-    prof_max_credits, class_can_teach, class_prefer, sem_name = read_input(input_file)
+        prof_max_credits, class_can_teach, class_prefer, sem_name = read_input(input_file)
 
-    sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer = creat_sections \
+    sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer = create_sections \
         (class_name, class_credits, class_sec_num, prof_name, prof_max_credits, class_can_teach, class_prefer, sem_name)
 
     professors, sections = create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
-                   prof_name, prof_max_credits)
+                                          prof_name, prof_max_credits)
 
-    model, classes = creat_model(professors, sections, sem_name)
-    solve_model(model, classes, professors, sections, sem_name)
+    model, classes = create_model(professors, sections, sem_name)
+    scheduled_classes, prof_class = solve_model(model, classes, professors, sections, sem_name)
+
+    # schedule time for each class
+    # get input from excel and create Time objects
+    # Time have start time, end time, list of 1/0 for weekdays, and list of conflicts with all time slots
+    Timeslots = pd.read_excel(input_file, sheet_name='Time')
+    times = []
+    for index, rows in Timeslots.iterrows():
+        info = rows.tolist()
+        t = Time(info[5], info[6], info[0:5])
+        times.append(t)
+    for t in times:
+        conflicts = {}
+        for c in times:
+            if t.conflict(c):
+                conflicts[c] = 1
+            else:
+                conflicts[c] = 0
+        t.conflicts = conflicts
+
+    # run on semester 0 only for now
+    sem_class = scheduled_classes[0]
+    sem_prof_class = prof_class[0]
+
+    # Creates the model.
+    model = cp_model.CpModel()
+    # Creates class variables.
+    # c - tuple (professor, section), t - time
+    time_assign = {}
+    for c in sem_class:
+        for t in times:
+            time_assign[(c, t)] = model.NewBoolVar('times_n%s%s%d' % (c[0].name, c[1].name, times.index(t)))
+
+    # hard constraints
+
+    # Each class is assigned to exactly one time slot.
+    for c in sem_class:
+        model.Add(sum(time_assign[(c, t)] for t in times) == 1)
+
+    # time slots for a professor don't conflict
+    '''for p in sem_prof_class:
+        model.Add(sum(time_assign[((p, c1), t1)] * time_assign[((p, c2), t2)] * t1.conflicts[t2]
+                        for c1 in sem_prof_class[p] for c2 in sem_prof_class[p] for t1 in times for t2 in times) == 1)'''
+
+    # Creates the solver and solve.
+    solver = cp_model.CpSolver()
+    solver.Solve(model)
+    if solver.StatusName() == 'INFEASIBLE':
+        exit('INFEASIBLE')
+    # print results
+    for c in sem_class:
+        for t in times:
+            if solver.Value(time_assign[(c, t)]) == 1:
+                print(c[0], c[1], t.start, t.end, t.weekday)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,6 @@
 
 
 class Professor:
-    'A professor with infos'
 
     def __init__(self, name, max_units, can_teach, preference):
         self.name = name
