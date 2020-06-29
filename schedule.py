@@ -89,10 +89,12 @@ def read_input(input_file):
     prof_tab = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
 
     # check that the same professors are defined across all tabs
-    assert set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index), 'some professors are missing from some tabs!'
+    professors_okay = set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index)
+    assert professors_okay, 'some professors are missing from some tabs!'
 
     # check that the same courses are defined across all tabs
-    assert set(can_teach_tab.columns) == set(prefer_tab.columns) == set(course_tab.index), 'some courses are missing from some tabs!'
+    courses_okay = set(can_teach_tab.columns) == set(prefer_tab.columns) == set(course_tab.index)
+    assert courses_okay, 'some courses are missing from some tabs!'
 
     course_names = set(can_teach_tab.columns)
     professor_names = set(can_teach_tab.index)
@@ -156,7 +158,6 @@ def create_model(professors, sections, semesters):
 
     # hard constraints
 
-
     # All sections must be assigned
     # TODO this may not be true in the future, if we just through all available courses into the solver
     model.Add(
@@ -187,8 +188,7 @@ def create_model(professors, sections, semesters):
             sum(
                 classes[(prof_name, section_name)] * section.units
                 for section_name, section in sections.items()
-            )
-            <= professor.max_units
+            ) <= professor.max_units
         )
         for semester in semesters:
             model.Add(
@@ -196,8 +196,7 @@ def create_model(professors, sections, semesters):
                     classes[(prof_name, section_name)] * section.units
                     for section_name, section in sections.items()
                     if section.semester == semester
-                )
-                <= MAX_UNITS_PER_SEMESTER
+                ) <= MAX_UNITS_PER_SEMESTER
             )
 
     # soft constraints
