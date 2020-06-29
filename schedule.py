@@ -72,14 +72,6 @@ class Professor:
             print(self.preference[sec])
 
 
-# return a list containing rows from DataFrame df, start from start_index in each row
-def get_rows(df, start_index=0):
-    data = []
-    for _, rows in df.iterrows():
-        data.append(rows.tolist()[start_index:])
-    return data
-
-
 # get data from excel
 # read input, separate classes into sections
 # check for infeasible situation, and store info into objects
