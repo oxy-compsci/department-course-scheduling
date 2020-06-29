@@ -98,8 +98,7 @@ def read_input(input_file):
     # infeasible if no prof can teach one class
 
     for col in class_name:
-        if sum(CanTeach[col].tolist()) == 0:
-            exit('No professor can teach ' + col)
+        assert sum(can_teach[col].tolist()) > 0, 'No professor can teach ' + col
 
     prof_max_credits = prof['MaxUnit'].tolist()
     class_sec_num = get_rows(course, 2)
@@ -163,16 +162,14 @@ def create_sections(
         sec_prefer.append(prefer)
 
     # check for infeasible situations
-    if sum(prof_max_credits) < sum(sec_credits):
-        exit('Professor can not provide enough number of units')
+    assert sum(sec_credits) <= sum(prof_max_credits), 'Professor can not provide enough number of units'
 
     for section in sec_name:
         assigned = False
         for sem in all_sems:
             if section[sem] == 1:
                 assigned = True
-        if not assigned:
-            exit(sec_name[x] + ' is not assigned to a semester')
+        assert assigned, section + ' is not assigned to a semester'
 
     return sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer
 
@@ -273,8 +270,7 @@ def solve_model(model, classes, professors, sections, semesters):
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
     solver.Solve(model)
-    if solver.StatusName() == 'INFEASIBLE':
-        exit('INFEASIBLE')
+    assert solver.StatusName() != 'INFEASIBLE', 'PROBLEM IS INFEASIBLE'
 
     scheduled_classes = []
     prof_class = []
@@ -362,8 +358,7 @@ def main():
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
     solver.Solve(model)
-    if solver.StatusName() == 'INFEASIBLE':
-        exit('INFEASIBLE')
+    assert solver.StatusName() != 'INFEASIBLE', 'PROBLEM IS INFEASIBLE'
     # print results
     for c in sem_class:
         for t in times:
