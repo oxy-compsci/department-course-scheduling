@@ -1,8 +1,7 @@
 from ortools.sat.python import cp_model
 import pandas as pd
-import xlrd
 
-Max_Unit_Per_Sem = 12
+MAX_UNITS_PER_SEMESTER = 12
 
 
 class Time:
@@ -65,18 +64,18 @@ class Professor:
         print('units:', self.max_units)
         print('can teach: ')
         for sec in self.can_teach:
-            print(sec, end = ' ')
+            print(sec, end=' ')
             print(self.can_teach[sec])
         print('prefer: ')
         for sec in self.preference:
-            print(sec, end = ' ')
+            print(sec, end=' ')
             print(self.preference[sec])
 
 
 # return a list containing rows from DataFrame df, start from start_index in each row
 def get_rows(df, start_index=0):
     data = []
-    for index, rows in df.iterrows():
+    for _, rows in df.iterrows():
         data.append(rows.tolist()[start_index:])
     return data
 
@@ -84,40 +83,42 @@ def get_rows(df, start_index=0):
 # get data from excel
 # read input, separate classes into sections
 # check for infeasible situation, and store info into objects
-def read_input(input):
-    input_file = 'Testing data.xlsx'
+def read_input(input_file):
     # get data from excel
-    CanTeach = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
-    Course = pd.read_excel(input_file, sheet_name='Course', index_col=0)
-    Prof = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
-    Prefer = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
-    class_name = CanTeach.columns.tolist()
-    prof_name = CanTeach.index.tolist()
-    sem_name = Course.columns.tolist()
+    can_teach = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
+    course = pd.read_excel(input_file, sheet_name='Course', index_col=0)
+    prof = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
+    prefer = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
+    class_name = can_teach.columns.tolist()
+    prof_name = can_teach.index.tolist()
+    sem_name = course.columns.tolist()
     sem_name.remove('Unit')
     sem_name.remove('UnitSum')
 
     # infeasible if no prof can teach one class
+
     for col in class_name:
         if sum(CanTeach[col].tolist()) == 0:
             exit('No professor can teach ' + col)
 
-    prof_max_credits = Prof['MaxUnit'].tolist()
-    class_sec_num = get_rows(Course, 2)
+    prof_max_credits = prof['MaxUnit'].tolist()
+    class_sec_num = get_rows(course, 2)
     # [[(class 0)section number in sem 0, section number in sem 1],
     # [(class 0)section number in sem 0, section number in sem 1], ...]
-    class_credits = Course['Unit'].tolist()
-    class_can_teach = get_rows(CanTeach)
+    class_credits = course['Unit'].tolist()
+    class_can_teach = get_rows(can_teach)
     # [[(prof 0) class 0, class 1, class 2,...], [(prof 2) class 0 ,...],...]
-    class_prefer = get_rows(Prefer)
+    class_prefer = get_rows(prefer)
 
     return class_name, class_credits, class_sec_num, prof_name, \
            prof_max_credits, class_can_teach, class_prefer, sem_name
 
 
 # separate classes into sections
-def create_sections(class_name, class_credits, class_sec_num, prof_name,
-                    prof_max_credits, class_can_teach, class_prefer, sem_name):
+def create_sections(
+    class_name, class_credits, class_sec_num, prof_name, prof_max_credits, class_can_teach,
+    class_prefer, sem_name
+):
     num_prof = len(prof_name)
     num_class = len(class_name)
     num_sem = len(sem_name)
@@ -132,7 +133,7 @@ def create_sections(class_name, class_credits, class_sec_num, prof_name,
         total_sec = sum(class_sec_num[c])
         sec_count = 0
         for sem in all_sems:
-            for sec in range(class_sec_num[c][sem]):
+            for _ in range(class_sec_num[c][sem]):
                 if sec_count < total_sec:
                     semester = [0] * num_sem
                     semester[sem] = 1
@@ -144,7 +145,7 @@ def create_sections(class_name, class_credits, class_sec_num, prof_name,
     sec_credits = []
     for c in all_classes:
         total_sec = sum(class_sec_num[c])
-        for sec in range(total_sec):
+        for _ in range(total_sec):
             sec_credits.append(class_credits[c])
 
     # expand can_teach and prefer
@@ -155,7 +156,7 @@ def create_sections(class_name, class_credits, class_sec_num, prof_name,
         prefer = []
         for c in all_classes:
             total_sec = sum(class_sec_num[c])
-            for sec in range(total_sec):
+            for _ in range(total_sec):
                 can_teach.append(class_can_teach[p][c])
                 prefer.append(class_prefer[p][c])
         sec_can_teach.append(can_teach)
@@ -165,10 +166,10 @@ def create_sections(class_name, class_credits, class_sec_num, prof_name,
     if sum(prof_max_credits) < sum(sec_credits):
         exit('Professor can not provide enough number of units')
 
-    for x in range(len(sec_name)):
+    for section in sec_name:
         assigned = False
         for sem in all_sems:
-            if sec_sem[x][sem] == 1:
+            if section[sem] == 1:
                 assigned = True
         if not assigned:
             exit(sec_name[x] + ' is not assigned to a semester')
@@ -178,8 +179,9 @@ def create_sections(class_name, class_credits, class_sec_num, prof_name,
 
 # put the information into section and professor objects
 # return two lists that contains all professors and sections
-def create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
-                   prof_name, prof_max_credits):
+def create_objects(
+    sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer, prof_name, prof_max_credits
+):
     all_secs = range(len(sec_name))
     all_profs = range(len(prof_name))
     sections = []
@@ -195,8 +197,7 @@ def create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
             can_teach[sections[y]] = sec_can_teach[x][y]
         for y in all_secs:
             prefer[sections[y]] = sec_prefer[x][y]
-        p = Professor(prof_name[x], prof_max_credits[x], can_teach, prefer)
-        professors.append(p)
+        professors.append(Professor(prof_name[x], prof_max_credits[x], can_teach, prefer))
 
     return professors, sections
 
@@ -225,22 +226,43 @@ def create_model(professors, sections, semesters):
     # Professors cannot teach more than their max number of units
     # 12 units per semester max
     for p in professors:
-        model.Add(sum(classes[(p, c, s)] * c.units for c in sections for s in semesters)
-                  <= p.max_units)
+        model.Add(
+            sum(classes[(p, c, s)] * c.units for c in sections for s in semesters)
+            <= p.max_units
+        )
         for s in semesters:
-            model.Add(sum(classes[(p, c, s)] * c.units for c in sections) <= Max_Unit_Per_Sem)
+            model.Add(
+                sum(classes[(p, c, s)] * c.units for c in sections)
+                <= MAX_UNITS_PER_SEMESTER
+            )
 
     # Only schedule classes that professors can teach
     # assign semesters to each class
-    model.Add(sum(classes[(p, c, s)] * p.can_teach[c] for p in professors
-                  for c in sections for s in semesters) == num_sec)
-    model.Add(sum(classes[(p, c, s)] * c.semester[semesters.index(s)] for p in professors
-                  for c in sections for s in semesters) == num_sec)
+    model.Add(
+        sum(
+            classes[(p, c, s)] * p.can_teach[c]
+            for p in professors
+            for c in sections
+            for s in semesters
+        ) == num_sec
+    )
+    model.Add(
+        sum(
+            classes[(p, c, s)] * c.semester[semesters.index(s)]
+            for p in professors
+            for c in sections
+            for s in semesters
+        ) == num_sec
+    )
 
     # soft constraints
     # assign classes according to prof preference
-    model.Maximize(sum(classes[(p, c, s)] * p.preference[c] for p in professors
-                       for c in sections for s in semesters))
+    model.Maximize(sum(
+        classes[(p, c, s)] * p.preference[c]
+        for p in professors
+        for c in sections
+        for s in semesters
+    ))
 
     return model, classes
 
@@ -273,9 +295,7 @@ def solve_model(model, classes, professors, sections, semesters):
                         print('Semester', s, c.name, '(not requested)')
         scheduled_classes.append(sem_class)
         prof_class.append(prof_sem)
-
         print()
-
     return scheduled_classes, prof_class
 
 
@@ -288,8 +308,9 @@ def main():
     sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer = create_sections \
         (class_name, class_credits, class_sec_num, prof_name, prof_max_credits, class_can_teach, class_prefer, sem_name)
 
-    professors, sections = create_objects(sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer,
-                                          prof_name, prof_max_credits)
+    professors, sections = create_objects(
+        sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer, prof_name, prof_max_credits
+    )
 
     model, classes = create_model(professors, sections, sem_name)
     scheduled_classes, prof_class = solve_model(model, classes, professors, sections, sem_name)
@@ -297,9 +318,9 @@ def main():
     # schedule time for each class
     # get input from excel and create Time objects
     # Time have start time, end time, list of 1/0 for weekdays, and list of conflicts with all time slots
-    Timeslots = pd.read_excel(input_file, sheet_name='Time')
+    timeslots = pd.read_excel(input_file, sheet_name='Time')
     times = []
-    for index, rows in Timeslots.iterrows():
+    for _, rows in timeslots.iterrows():
         info = rows.tolist()
         t = Time(info[5], info[6], info[0:5])
         times.append(t)
@@ -323,7 +344,9 @@ def main():
     time_assign = {}
     for c in sem_class:
         for t in times:
-            time_assign[(c, t)] = model.NewBoolVar('times_n%s%s%d' % (c[0].name, c[1].name, times.index(t)))
+            time_assign[(c, t)] = model.NewBoolVar(
+                'times_n%s%s%d' % (c[0].name, c[1].name, times.index(t))
+            )
 
     # hard constraints
 
