@@ -34,16 +34,22 @@ class Time:
 
 class Section:
 
-    def __init__(self, name, units, semester):
-        self.name = name
+    def __init__(self, course, section, units, semester):
+        self.course = course
+        self.section = section
         self.units = units
         self.semester = semester
 
     def __str__(self):
         return self.name
 
+    @property
+    def name(self):
+        return self.semester + ' ' + self.course + ' Section ' + str(self.section)
+
     def info(self):
-        print('name:', self.name)
+        print('course:', self.course)
+        print('section:', self.section)
         print('units:', self.units)
         print('semester:', self.semester)
 
@@ -77,180 +83,130 @@ class Professor:
 # check for infeasible situation, and store info into objects
 def read_input(input_file):
     # get data from excel
-    can_teach = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
-    course = pd.read_excel(input_file, sheet_name='Course', index_col=0)
-    prof = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
-    prefer = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
-    class_name = can_teach.columns.tolist()
-    prof_name = can_teach.index.tolist()
-    sem_name = course.columns.tolist()
-    sem_name.remove('Unit')
-    sem_name.remove('UnitSum')
+    can_teach_tab = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
+    prefer_tab = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
+    course_tab = pd.read_excel(input_file, sheet_name='Course', index_col=0)
+    prof_tab = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
 
-    # infeasible if no prof can teach one class
+    # check that the same professors are defined across all tabs
+    assert set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index), 'some professors are missing from some tabs!'
 
-    for col in class_name:
-        assert sum(can_teach[col].tolist()) > 0, 'No professor can teach ' + col
+    # check that the same courses are defined across all tabs
+    assert set(can_teach_tab.columns) == set(prefer_tab.columns) == set(course_tab.index), 'some courses are missing from some tabs!'
 
-    prof_max_credits = prof['MaxUnit'].tolist()
-    class_sec_num = get_rows(course, 2)
-    # [[(class 0)section number in sem 0, section number in sem 1],
-    # [(class 0)section number in sem 0, section number in sem 1], ...]
-    class_credits = course['Unit'].tolist()
-    class_can_teach = get_rows(can_teach)
-    # [[(prof 0) class 0, class 1, class 2,...], [(prof 2) class 0 ,...],...]
-    class_prefer = get_rows(prefer)
+    course_names = set(can_teach_tab.columns)
+    professor_names = set(can_teach_tab.index)
+    semesters = course_tab.columns.tolist()
+    semesters.remove('Unit')
+    semesters.remove('UnitSum')
 
-    return class_name, class_credits, class_sec_num, prof_name, \
-           prof_max_credits, class_can_teach, class_prefer, sem_name
+    professors = {}
+    for name in professor_names:
+        max_units = prof_tab['MaxUnit'][name]
+        capabilities = set(
+            course_name for course_name in course_names
+            if can_teach_tab[course_name][name] == 1
+        )
+        preferences = set(
+            course_name for course_name in course_names
+            if prefer_tab[course_name][name] == 1
+        )
+        professors[name] = Professor(name, max_units, capabilities, preferences)
 
+    sections = {}
+    for course_name in course_names:
+        units = course_tab['Unit'][course_name]
+        for semester in semesters:
+            num_sections = course_tab[semester][course_name]
+            for section_num in range(num_sections):
+                section = Section(course_name, section_num, units, semester)
+                sections[section.name] = section
 
-# separate classes into sections
-def create_sections(
-    class_name, class_credits, class_sec_num, prof_name, prof_max_credits, class_can_teach,
-    class_prefer, sem_name
-):
-    num_prof = len(prof_name)
-    num_class = len(class_name)
-    num_sem = len(sem_name)
-    all_profs = range(num_prof)
-    all_classes = range(num_class)
-    all_sems = range(num_sem)
+    # error checking
 
-    # expand name and semester lists
-    sec_name = []
-    sec_sem = []
-    for c in all_classes:
-        total_sec = sum(class_sec_num[c])
-        sec_count = 0
-        for sem in all_sems:
-            for _ in range(class_sec_num[c][sem]):
-                if sec_count < total_sec:
-                    semester = [0] * num_sem
-                    semester[sem] = 1
-                    sec_sem.append(semester)
-                    sec_name.append('%s Section %i' % (class_name[c], sec_count))
-                sec_count = sec_count + 1
+    # check that every course has at least one professor who can teach it
+    for course_name in course_names:
+        if not any(course_name in professor.can_teach for professor in professors.values()):
+            raise ValueError('No professor can teach ' + course_name)
 
-    # expand credits lists
-    sec_credits = []
-    for c in all_classes:
-        total_sec = sum(class_sec_num[c])
-        for _ in range(total_sec):
-            sec_credits.append(class_credits[c])
+    # check that the total number of units from professors is enough
+    # TODO this may not be true in the future, if we just through all available courses into the solver
+    total_professor_units = sum(professor.max_units for professor in professors.values())
+    total_course_units = sum(section.units for section in sections.values())
+    if total_course_units > total_professor_units:
+        raise ValueError('Professors can only teach {} units but there are {} course units total'.format(
+            total_professor_units,
+            total_course_units,
+        ))
 
-    # expand can_teach and prefer
-    sec_can_teach = []
-    sec_prefer = []
-    for p in all_profs:
-        can_teach = []
-        prefer = []
-        for c in all_classes:
-            total_sec = sum(class_sec_num[c])
-            for _ in range(total_sec):
-                can_teach.append(class_can_teach[p][c])
-                prefer.append(class_prefer[p][c])
-        sec_can_teach.append(can_teach)
-        sec_prefer.append(prefer)
-
-    # check for infeasible situations
-    assert sum(sec_credits) <= sum(prof_max_credits), 'Professor can not provide enough number of units'
-
-    for section in sec_name:
-        assigned = False
-        for sem in all_sems:
-            if section[sem] == 1:
-                assigned = True
-        assert assigned, section + ' is not assigned to a semester'
-
-    return sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer
-
-
-# put the information into section and professor objects
-# return two lists that contains all professors and sections
-def create_objects(
-    sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer, prof_name, prof_max_credits
-):
-    all_secs = range(len(sec_name))
-    all_profs = range(len(prof_name))
-    sections = []
-    for x in all_secs:
-        c = Section(sec_name[x], sec_credits[x], sec_sem[x])
-        sections.append(c)
-
-    professors = []
-    for x in all_profs:
-        can_teach = {}
-        prefer = {}
-        for y in all_secs:
-            can_teach[sections[y]] = sec_can_teach[x][y]
-        for y in all_secs:
-            prefer[sections[y]] = sec_prefer[x][y]
-        professors.append(Professor(prof_name[x], prof_max_credits[x], can_teach, prefer))
-
-    return professors, sections
+    return semesters, sections, professors
 
 
 # create model and add constraints
 def create_model(professors, sections, semesters):
-    num_sec = len(sections)
-
     # Creates the model.
     model = cp_model.CpModel()
 
     # Creates class variables.
     # classes[(p,c,s)]: professor 'p' teaches class 'c' in semester 's'
     classes = {}
-    for p in professors:
-        for c in sections:
-            for s in semesters:
-                classes[(p, c, s)] = model.NewBoolVar('classes_n%s%s%s' % (p.name, c.name, s))
+    for professor in professors.values():
+        for section in sections.values():
+            classes[(professor.name, section.name)] = model.NewBoolVar('{} teaches {}'.format(professor.name, section.name))
 
     # hard constraints
 
+
+    # All sections must be assigned
+    # TODO this may not be true in the future, if we just through all available courses into the solver
+    model.Add(
+        sum(
+            classes[(prof_name, section_name)]
+            for prof_name in professors
+            for section_name in sections
+        ) == len(sections)
+    )
+
     # Each class is assigned to exactly one professor.
-    for c in sections:
-        model.Add(sum(classes[(p, c, s)] for p in professors for s in semesters) == 1)
+    for section_name in sections:
+        model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) == 1)
+
+    # Only schedule classes that professors can teach
+    model.Add(
+        sum(
+            classes[(prof_name, section_name)] * (1 if section.course in professor.can_teach else 0)
+            for prof_name, professor in professors.items()
+            for section_name, section in sections.items()
+        ) == len(sections)
+    )
 
     # Professors cannot teach more than their max number of units
     # 12 units per semester max
-    for p in professors:
+    for prof_name, professor in professors.items():
         model.Add(
-            sum(classes[(p, c, s)] * c.units for c in sections for s in semesters)
-            <= p.max_units
+            sum(
+                classes[(prof_name, section_name)] * section.units
+                for section_name, section in sections.items()
+            )
+            <= professor.max_units
         )
-        for s in semesters:
+        for semester in semesters:
             model.Add(
-                sum(classes[(p, c, s)] * c.units for c in sections)
+                sum(
+                    classes[(prof_name, section_name)] * section.units
+                    for section_name, section in sections.items()
+                    if section.semester == semester
+                )
                 <= MAX_UNITS_PER_SEMESTER
             )
 
-    # Only schedule classes that professors can teach
-    # assign semesters to each class
-    model.Add(
-        sum(
-            classes[(p, c, s)] * p.can_teach[c]
-            for p in professors
-            for c in sections
-            for s in semesters
-        ) == num_sec
-    )
-    model.Add(
-        sum(
-            classes[(p, c, s)] * c.semester[semesters.index(s)]
-            for p in professors
-            for c in sections
-            for s in semesters
-        ) == num_sec
-    )
-
     # soft constraints
+
     # assign classes according to prof preference
     model.Maximize(sum(
-        classes[(p, c, s)] * p.preference[c]
-        for p in professors
-        for c in sections
-        for s in semesters
+        classes[(prof_name, section_name)] * (1 if section_name in professor.preference else 0)
+        for prof_name, professor in professors.items()
+        for section_name in sections
     ))
 
     return model, classes
@@ -263,45 +219,53 @@ def solve_model(model, classes, professors, sections, semesters):
     solver = cp_model.CpSolver()
     solver.Solve(model)
     assert solver.StatusName() != 'INFEASIBLE', 'PROBLEM IS INFEASIBLE'
+    return solver
 
-    scheduled_classes = []
-    prof_class = []
-    for s in semesters:
-        sem_class = []
-        prof_sem = {}
-        print(s)
-        for p in professors:
-            prof_sem[p] = []
-            print(p)
-            for c in sections:
-                if solver.Value(classes[(p, c, s)]) == 1:
-                    sem_class.append((p, c))
-                    prof_sem[p].append(c)
-                    if p.preference[c] == 1:
-                        print('Semester', s, c.name, '(requested)')
+
+def print_results(solver, classes, professors, sections, semesters):
+
+    # print in course-first format
+    for semester in semesters:
+        print(semester)
+        for _, section in sorted(sections.items()):
+            if section.semester != semester:
+                continue
+            for _, professor in sorted(professors.items()):
+                if solver.Value(classes[(professor.name, section.name)]) == 1:
+                    if section.course in professor.preference:
+                        print(section.name + ' assigned to ' + professor.name + ' (requested)')
                     else:
-                        print('Semester', s, c.name, '(not requested)')
-        scheduled_classes.append(sem_class)
-        prof_class.append(prof_sem)
+                        print(section.name + ' assigned to ' + professor.name + ' (not requested)')
+                    break
         print()
-    return scheduled_classes, prof_class
+
+    # print in professor-first format
+    for semester in semesters:
+        print(semester)
+        for _, professor in sorted(professors.items()):
+            for _, section in sorted(sections.items()):
+                if section.semester != semester:
+                    continue
+                if solver.Value(classes[(professor.name, section.name)]) == 1:
+                    if section.course in professor.preference:
+                        print(professor.name + ' will be teaching ' + section.name + ' (requested)')
+                    else:
+                        print(professor.name + ' will be teaching ' + section.name + ' (not requested)')
+        print()
 
 
 def main():
     # switch input data order
     input_file = 'Testing data.xlsx'
-    class_name, class_credits, class_sec_num, prof_name, \
-        prof_max_credits, class_can_teach, class_prefer, sem_name = read_input(input_file)
+    semesters, sections, professors = read_input(input_file)
 
-    sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer = create_sections \
-        (class_name, class_credits, class_sec_num, prof_name, prof_max_credits, class_can_teach, class_prefer, sem_name)
+    model, classes = create_model(professors, sections, semesters)
 
-    professors, sections = create_objects(
-        sec_name, sec_credits, sec_sem, sec_can_teach, sec_prefer, prof_name, prof_max_credits
-    )
+    solver = solve_model(model, classes, professors, sections, semesters)
 
-    model, classes = create_model(professors, sections, sem_name)
-    scheduled_classes, prof_class = solve_model(model, classes, professors, sections, sem_name)
+    print_results(solver, classes, professors, sections, semesters)
+
+    exit()
 
     # schedule time for each class
     # get input from excel and create Time objects
