@@ -265,8 +265,8 @@ def main():
 
     print_results(solver, classes, professors, sections, semesters)
 
-    exit()
-
+    # FIXME previous work in progress, currently unused (and obsolete)
+    '''
     # schedule time for each class
     # get input from excel and create Time objects
     # Time have start time, end time, list of 1/0 for weekdays, and list of conflicts with all time slots
@@ -307,9 +307,16 @@ def main():
         model.Add(sum(time_assign[(c, t)] for t in times) == 1)
 
     # time slots for a professor don't conflict
-    '''for p in sem_prof_class:
-        model.Add(sum(time_assign[((p, c1), t1)] * time_assign[((p, c2), t2)] * t1.conflicts[t2]
-                        for c1 in sem_prof_class[p] for c2 in sem_prof_class[p] for t1 in times for t2 in times) == 1)'''
+    for p in sem_prof_class:
+        model.Add(
+            sum(
+                time_assign[((p, c1), t1)] * time_assign[((p, c2), t2)] * t1.conflicts[t2]
+                for c1 in sem_prof_class[p] 
+                for c2 in sem_prof_class[p] 
+                for t1 in times 
+                for t2 in times
+            ) == 1
+        )
 
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
@@ -320,6 +327,7 @@ def main():
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
                 print(c[0], c[1], t.start, t.end, t.weekday)
+    '''
 
 
 if __name__ == '__main__':
