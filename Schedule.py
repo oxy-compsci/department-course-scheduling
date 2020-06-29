@@ -1,11 +1,76 @@
 from ortools.sat.python import cp_model
 import pandas as pd
 import xlrd
-from Professor import Professor
-from Section import Section
-from Time import Time
 
 Max_Unit_Per_Sem = 12
+
+
+class Time:
+
+    def __init__(self, start, end, weekday):
+        self.start = start
+        self.end = end
+        self.weekday = weekday
+
+    def info(self):
+        print('start:', self.start)
+        print('end:', self.end)
+        print('weekday:', self.weekday)
+
+    # check if conflicts with a time
+    # return true if there is a conflict
+    def conflict(self, time):
+        for day in range(len(self.weekday)):
+            if self.weekday[day] == 1 and time.weekday[day] == 1:
+                if time.start <= self.start <= time.end:
+                    return True
+                if time.start <= self.end <= time.end:
+                    return True
+                if self.start <= time.start <= self.end:
+                    return True
+                if self.start <= time.end <= self.end:
+                    return True
+        return False
+
+
+class Section:
+
+    def __init__(self, name, units, semester):
+        self.name = name
+        self.units = units
+        self.semester = semester
+
+    def __str__(self):
+        return self.name
+
+    def info(self):
+        print('name:', self.name)
+        print('units:', self.units)
+        print('semester:', self.semester)
+
+
+class Professor:
+
+    def __init__(self, name, max_units, can_teach, preference):
+        self.name = name
+        self.max_units = max_units
+        self.can_teach = can_teach
+        self.preference = preference
+
+    def __str__(self):
+        return self.name
+
+    def info(self):
+        print('name:', self.name)
+        print('units:', self.max_units)
+        print('can teach: ')
+        for sec in self.can_teach:
+            print(sec, end = ' ')
+            print(self.can_teach[sec])
+        print('prefer: ')
+        for sec in self.preference:
+            print(sec, end = ' ')
+            print(self.preference[sec])
 
 
 # return a list containing rows from DataFrame df, start from start_index in each row
