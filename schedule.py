@@ -77,6 +77,18 @@ class Professor:
             print(sec, end=' ')
             print(self.preference[sec])
 
+    def can_teach(self, course):
+        if course in self.capabilities:
+            return 1
+        else:
+            return 0
+
+    def prefers(self, course):
+        if course in self.preference:
+            return 1
+        else:
+            return 0
+
 
 # get data from excel
 # read input, separate classes into sections
@@ -175,7 +187,7 @@ def create_model(professors, sections, semesters):
     # Only schedule classes that professors can teach
     model.Add(
         sum(
-            classes[(prof_name, section_name)] * (1 if section.course in professor.capabilities else 0)
+            classes[(prof_name, section_name)] * professor.can_teach(section.course)
             for prof_name, professor in professors.items()
             for section_name, section in sections.items()
         ) == len(sections)
@@ -203,9 +215,9 @@ def create_model(professors, sections, semesters):
 
     # assign classes according to prof preference
     model.Maximize(sum(
-        classes[(prof_name, section_name)] * (1 if section_name in professor.preference else 0)
+        classes[(prof_name, section_name)] * professor.prefers(section.course)
         for prof_name, professor in professors.items()
-        for section_name in sections
+        for section_name, section in sections.items()
     ))
 
     return model, classes
@@ -256,6 +268,7 @@ def print_results(solver, classes, professors, sections, semesters):
 def main():
     # switch input data order
     input_file = 'Testing data.xlsx'
+
     semesters, sections, professors = read_input(input_file)
 
     model, classes = create_model(professors, sections, semesters)
