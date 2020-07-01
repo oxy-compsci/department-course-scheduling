@@ -56,10 +56,10 @@ class Section:
 
 class Professor:
 
-    def __init__(self, name, max_units, can_teach, preference):
+    def __init__(self, name, max_units, capabilities, preference):
         self.name = name
         self.max_units = max_units
-        self.can_teach = can_teach
+        self.capabilities = capabilities
         self.preference = preference
 
     def __str__(self):
@@ -69,9 +69,9 @@ class Professor:
         print('name:', self.name)
         print('units:', self.max_units)
         print('can teach: ')
-        for sec in self.can_teach:
+        for sec in self.capabilities:
             print(sec, end=' ')
-            print(self.can_teach[sec])
+            print(self.capabilities[sec])
         print('prefer: ')
         for sec in self.preference:
             print(sec, end=' ')
@@ -128,7 +128,7 @@ def read_input(input_file):
 
     # check that every course has at least one professor who can teach it
     for course_name in course_names:
-        if not any(course_name in professor.can_teach for professor in professors.values()):
+        if not any(course_name in professor.capabilities for professor in professors.values()):
             raise ValueError('No professor can teach ' + course_name)
 
     # check that the total number of units from professors is enough
@@ -175,7 +175,7 @@ def create_model(professors, sections, semesters):
     # Only schedule classes that professors can teach
     model.Add(
         sum(
-            classes[(prof_name, section_name)] * (1 if section.course in professor.can_teach else 0)
+            classes[(prof_name, section_name)] * (1 if section.course in professor.capabilities else 0)
             for prof_name, professor in professors.items()
             for section_name, section in sections.items()
         ) == len(sections)
