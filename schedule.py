@@ -99,6 +99,7 @@ def read_input(input_file):
     prefer_tab = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
     course_tab = pd.read_excel(input_file, sheet_name='Course', index_col=0)
     prof_tab = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
+    time_tab = pd.read_excel(input_file, sheet_name='Time', index_col=None)
 
     # check that the same professors are defined across all tabs
     professors_okay = set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index)
@@ -136,6 +137,22 @@ def read_input(input_file):
                 section = Section(course_name, section_num, units, semester)
                 sections[section.name] = section
 
+    # create Time objects
+    # Time have start time, end time, list of 1/0 for weekdays, and list of conflicts with all time slots
+    times = []
+    for _, rows in time_tab.iterrows():
+        info = rows.tolist()
+        t = Time(info[5], info[6], info[0:5])
+        times.append(t)
+    for t in times:
+        conflicts = {}
+        for c in times:
+            if t.conflict(c):
+                conflicts[c] = 1
+            else:
+                conflicts[c] = 0
+        t.conflicts = conflicts
+
     # error checking
 
     # check that every course has at least one professor who can teach it
@@ -153,7 +170,7 @@ def read_input(input_file):
             total_course_units,
         ))
 
-    return semesters, sections, professors
+    return semesters, sections, professors, times
 
 
 # create model and add constraints
@@ -162,7 +179,7 @@ def create_model(professors, sections, semesters):
     model = cp_model.CpModel()
 
     # Creates class variables.
-    # classes[(p,c,s)]: professor 'p' teaches class 'c' in semester 's'
+    # classes[(p,c,s)]: professor 'p' teaches class 'c'
     classes = {}
     for professor in professors.values():
         for section in sections.values():
@@ -223,9 +240,7 @@ def create_model(professors, sections, semesters):
     return model, classes
 
 
-# solve and print the schedule
-# return infos for timeslots scheduling
-def solve_model(model, classes, professors, sections, semesters):
+def solve_model(model):
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
     solver.Solve(model)
@@ -243,7 +258,7 @@ def print_results(solver, classes, professors, sections, semesters):
                 continue
             for _, professor in sorted(professors.items()):
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
-                    if section.course in professor.preference:
+                    if professor.prefers(section.course):
                         print(section.name + ' assigned to ' + professor.name + ' (requested)')
                     else:
                         print(section.name + ' assigned to ' + professor.name + ' (not requested)')
@@ -258,88 +273,117 @@ def print_results(solver, classes, professors, sections, semesters):
                 if section.semester != semester:
                     continue
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
-                    if section.course in professor.preference:
+                    if professor.prefers(section.course):
                         print(professor.name + ' will be teaching ' + section.name + ' (requested)')
                     else:
                         print(professor.name + ' will be teaching ' + section.name + ' (not requested)')
         print()
+        
+    # Statistics.
+    print('Statistics')
+    print('  - Number of requests met = %i' % solver.ObjectiveValue())
+    print('  - wall time       : %f s' % solver.WallTime())
 
 
-def main():
-    # switch input data order
-    input_file = 'Testing data.xlsx'
+# return infos for timeslots scheduling
+# list of scheduled classes tuple (professor.name, section.name) , listed by semesters
+def get_scheduled_classes(solver, classes, professors, sections, semesters):
+    scheduled_classes = {}
+    for semester in semesters:
+        profs_classeses = []
+        for _, section in sections.items():
+            if section.semester != semester:
+                continue
+            for _, professor in professors.items():
+                if solver.Value(classes[(professor.name, section.name)]) == 1:
+                    profs_classeses.append((professor.name, section.name))
+                    break
+        scheduled_classes[semester] = profs_classeses
+    return scheduled_classes
 
-    semesters, sections, professors = read_input(input_file)
 
-    model, classes = create_model(professors, sections, semesters)
-
-    solver = solve_model(model, classes, professors, sections, semesters)
-
-    print_results(solver, classes, professors, sections, semesters)
-
-    # FIXME previous work in progress, currently unused (and obsolete)
-    '''
-    # schedule time for each class
-    # get input from excel and create Time objects
-    # Time have start time, end time, list of 1/0 for weekdays, and list of conflicts with all time slots
-    timeslots = pd.read_excel(input_file, sheet_name='Time')
-    times = []
-    for _, rows in timeslots.iterrows():
-        info = rows.tolist()
-        t = Time(info[5], info[6], info[0:5])
-        times.append(t)
-    for t in times:
-        conflicts = {}
-        for c in times:
-            if t.conflict(c):
-                conflicts[c] = 1
-            else:
-                conflicts[c] = 0
-        t.conflicts = conflicts
-
-    # run on semester 0 only for now
-    sem_class = scheduled_classes[0]
-    sem_prof_class = prof_class[0]
+def create_timetable_model(profs_classes, times):
+    prof_teach = {}  # professor to list of scheduled classes
+    for prof_sec in profs_classes:
+        prof = prof_sec[0]
+        sec = prof_sec[1]
+        if prof in prof_teach:
+            prof_teach[prof].append(sec)
+        else:
+            prof_teach[prof] = [sec]
 
     # Creates the model.
     model = cp_model.CpModel()
-    # Creates class variables.
+    # Creates variables.
     # c - tuple (professor, section), t - time
     time_assign = {}
-    for c in sem_class:
+    for c in profs_classes:
         for t in times:
             time_assign[(c, t)] = model.NewBoolVar(
-                'times_n%s%s%d' % (c[0].name, c[1].name, times.index(t))
+                '{} teaches {} in timeslot {}'.format(c[0], c[1], times.index(t))
             )
 
     # hard constraints
-
     # Each class is assigned to exactly one time slot.
-    for c in sem_class:
+    for c in profs_classes:
         model.Add(sum(time_assign[(c, t)] for t in times) == 1)
 
     # time slots for a professor don't conflict
-    for p in sem_prof_class:
-        model.Add(
-            sum(
-                time_assign[((p, c1), t1)] * time_assign[((p, c2), t2)] * t1.conflicts[t2]
-                for c1 in sem_prof_class[p] 
-                for c2 in sem_prof_class[p] 
-                for t1 in times 
-                for t2 in times
-            ) == 1
-        )
+    for prof_name, sec_name in prof_teach.items():
+        for s1 in sec_name:
+            for s2 in sec_name:
+                for t1 in times:
+                    for t2 in times:
+                        if s1 != s2:
+                            content = [time_assign[((prof_name, s1), t1)], time_assign[((prof_name, s2), t2)],
+                                       t1.conflicts[t2]]
+                            model.AddMultiplicationEquality(0, content)
 
-    # Creates the solver and solve.
-    solver = cp_model.CpSolver()
-    solver.Solve(model)
-    assert solver.StatusName() != 'INFEASIBLE', 'PROBLEM IS INFEASIBLE'
-    # print results
-    for c in sem_class:
+    # FIXME previous work in progress, currently unused (and obsolete)
+    # Minimize the overall time conflicts
+    '''
+    model.Minimize(
+            sum(
+                (time_assign[((prof_name, s1), t1)] + time_assign[((prof_name, s2), t2)]) * t1.conflicts[t2]
+                for prof_name, sec_name in prof_teach.items()
+                for s1 in sec_name
+                for s2 in sec_name
+                for t1 in times
+                for t2 in times))
+    '''
+    return model, time_assign
+
+
+# print the final timetable for one semester
+# professor, class name, start time, end time, weekday
+def print_timetable(solver, time_assign, times, profs_classes):
+    for c in profs_classes:
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
                 print(c[0], c[1], t.start, t.end, t.weekday)
-    '''
+    print()
+
+def main():
+
+    # switch input data order
+    input_file = 'Testing data.xlsx'
+
+    semesters, sections, professors, times = read_input(input_file)
+
+    model, classes = create_model(professors, sections, semesters)
+
+    solver = solve_model(model)
+
+    print_results(solver, classes, professors, sections, semesters)
+
+    scheduled_classes = get_scheduled_classes(solver, classes, professors, sections, semesters)
+
+    for semester in semesters:
+        profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
+        model, time_assign = create_timetable_model(profs_classes, times)
+        solver = solve_model(model)
+        print_timetable(solver, time_assign, times, profs_classes)
+
 
 
 if __name__ == '__main__':
