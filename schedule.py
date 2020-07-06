@@ -162,6 +162,7 @@ def read_input(input_file):
 
     # check that the total number of units from professors is enough
     # TODO this may not be true in the future, if we just through all available courses into the solver
+    # put in all available courses and select ones with professor preference/set if the course must be offered
     total_professor_units = sum(professor.max_units for professor in professors.values())
     total_course_units = sum(section.units for section in sections.values())
     if total_course_units > total_professor_units:
@@ -339,18 +340,33 @@ def create_timetable_model(profs_classes, times):
                                        t1.conflicts[t2]]
                             model.AddMultiplicationEquality(0, content)
 
-    # FIXME previous work in progress, currently unused (and obsolete)
+
     # Minimize the overall time conflicts
-    '''
-    model.Minimize(
-            sum(
-                (time_assign[((prof_name, s1), t1)] + time_assign[((prof_name, s2), t2)]) * t1.conflicts[t2]
-                for prof_name, sec_name in prof_teach.items()
-                for s1 in sec_name
-                for s2 in sec_name
-                for t1 in times
-                for t2 in times))
-    '''
+    conflicts = {}
+    conflict_name_template = 'course {} (timeslot {}) and course {} (timeslot {}) conflict'
+    for time1 in times:
+        for time2 in times:
+            if not time1.conflict(time2):
+                continue
+            for course1 in profs_classes:
+                for course2 in profs_classes:
+                    if course1 == course2:
+                        continue
+                    # (course1, time1) && (course2, time2) -> (course1, time1, course2, time2)
+                    key = (course1, time1, course2, time2)
+                    # create the conflict variable
+                    conflicts[key] = model.NewBoolVar(conflict_name_template.format(*key))
+                    # tell the model that (course1, time1) && (course2, time2) -> AND_VAR
+                    model.Add(conflicts[key] == 1).OnlyEnforceIf([
+                        time_assign[(course1, time1)],
+                        time_assign[(course2, time2)],
+                    ])
+    model.Minimize(sum(conflicts.values()))
+
+    # Assign according to prof preference - both hard and soft, preferences over general time periods
+    # (MWF/TR, morning/evening)
+    # create the conflict variable
+
     return model, time_assign
 
 
@@ -362,6 +378,7 @@ def print_timetable(solver, time_assign, times, profs_classes):
             if solver.Value(time_assign[(c, t)]) == 1:
                 print(c[0], c[1], t.start, t.end, t.weekday)
     print()
+
 
 def main():
 
@@ -383,7 +400,6 @@ def main():
         model, time_assign = create_timetable_model(profs_classes, times)
         solver = solve_model(model)
         print_timetable(solver, time_assign, times, profs_classes)
-
 
 
 if __name__ == '__main__':
