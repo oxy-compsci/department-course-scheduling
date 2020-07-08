@@ -160,16 +160,11 @@ def read_input(input_file):
         if not any(course_name in professor.capabilities for professor in professors.values()):
             raise ValueError('No professor can teach ' + course_name)
 
-    # check that the total number of units from professors is enough
-    # TODO this may not be true in the future, if we just through all available courses into the solver
-    # put in all available courses and select ones with professor preference/set if the course must be offered
+    # check that the total number of units
     total_professor_units = sum(professor.max_units for professor in professors.values())
     total_course_units = sum(section.units for section in sections.values())
-    if total_course_units > total_professor_units:
-        raise ValueError('Professors can only teach {} units but there are {} course units total'.format(
-            total_professor_units,
-            total_course_units,
-        ))
+    print('Professors can teach', total_professor_units, 'units.')
+    print('There are', total_course_units, 'units form all classes.')
 
     return semesters, sections, professors, times
 
@@ -188,28 +183,16 @@ def create_model(professors, sections, semesters):
 
     # hard constraints
 
-    # All sections must be assigned
-    # TODO this may not be true in the future, if we just through all available courses into the solver
-    model.Add(
-        sum(
-            classes[(prof_name, section_name)]
-            for prof_name in professors
-            for section_name in sections
-        ) == len(sections)
-    )
-
-    # Each class is assigned to exactly one professor.
+    # Each class is assigned to one professor or no professor.
+    # allowing classes to not be assigned
     for section_name in sections:
-        model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) == 1)
+        model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) <= 1)
 
     # Only schedule classes that professors can teach
-    model.Add(
-        sum(
-            classes[(prof_name, section_name)] * professor.can_teach(section.course)
-            for prof_name, professor in professors.items()
-            for section_name, section in sections.items()
-        ) == len(sections)
-    )
+    # Constraint does not need variable?
+    for prof_name, professor in professors.items():
+        for section_name, section in sections.items():
+            model.Add(professor.can_teach(section.course) == 1).OnlyEnforceIf(classes[(prof_name, section_name)])
 
     # Professors cannot teach more than their max number of units
     # 12 units per semester max
