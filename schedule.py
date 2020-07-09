@@ -1,6 +1,7 @@
 from ortools.sat.python import cp_model
 import pandas as pd
 import datetime
+import copy
 
 MAX_UNITS_PER_SEMESTER = 12
 TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
@@ -435,6 +436,18 @@ def print_timetable(solver, time_assign, times, profs_classes, professors):
     print()
 
 
+# find more timetable by setting one class to one time slot
+# print the optimal ones with the same objective_value
+def find_all_timetable(profs_classes, times, model, time_assign, objective_value, professors):
+    for c in profs_classes:
+        for t in times:
+            copies = copy.deepcopy(model)
+            copies.Add(time_assign[(c, t)] == 1)
+            solver = solve_model(copies)
+            if solver.ObjectiveValue() == objective_value:
+                print_timetable(solver, time_assign, times, profs_classes, professors)
+
+
 def main():
     # switch input data order
     input_file = 'Testing data.xlsx'
@@ -453,8 +466,10 @@ def main():
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
         model, time_assign = create_timetable_model(profs_classes, professors, times)
         solver = solve_model(model)
+        objective_value = solver.ObjectiveValue()
         print_timetable(solver, time_assign, times, profs_classes, professors)
 
+        # find_all_timetable(profs_classes, times, model, time_assign, objective_value, professors)
 
 if __name__ == '__main__':
     main()
