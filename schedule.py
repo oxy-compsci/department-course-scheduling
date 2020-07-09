@@ -1,15 +1,34 @@
 from ortools.sat.python import cp_model
 import pandas as pd
+import datetime
 
 MAX_UNITS_PER_SEMESTER = 12
+TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
+
 
 
 class Time:
+    Days_of_week = {'MWF': [1, 0, 1, 0, 1],
+                    'TR': [0, 1, 0, 1, 0],
+                    'MW': [1, 0, 1, 0, 0],
+                    'MTWRF': [1, 1, 1, 1, 1],
+                    'MF': [1, 0, 0, 0, 1],
+                    'WF': [0, 0, 1, 0, 1],
+                    'T': [0, 1, 0, 0, 0],
+                    'W': [0, 0, 1, 0, 0],
+                    'R': [0, 0, 0, 1, 0]}
 
     def __init__(self, start, end, weekday):
         self.start = start
         self.end = end
         self.weekday = weekday
+        self.days_of_week = get_key(Time.Days_of_week, weekday)
+        self.timeframe = 'Evening'
+        if self.start <= datetime.time(17, 0, 0):
+            self.timeframe = 'Afternoon'
+        if self.start <= datetime.time(12, 0, 0):
+            self.timeframe = 'Morning'
+
 
     def info(self):
         print('start:', self.start)
@@ -56,11 +75,13 @@ class Section:
 
 class Professor:
 
-    def __init__(self, name, max_units, capabilities, preference):
+    def __init__(self, name, max_units, capabilities, preference, timeframe, days_of_week):
         self.name = name
         self.max_units = max_units
         self.capabilities = capabilities
         self.preference = preference
+        self.timeframe = timeframe
+        self.days_of_week = days_of_week
 
     def __str__(self):
         return self.name
@@ -71,11 +92,9 @@ class Professor:
         print('can teach: ')
         for sec in self.capabilities:
             print(sec, end=' ')
-            print(self.capabilities[sec])
         print('prefer: ')
         for sec in self.preference:
             print(sec, end=' ')
-            print(self.preference[sec])
 
     def can_teach(self, course):
         if course in self.capabilities:
@@ -89,6 +108,27 @@ class Professor:
         else:
             return 0
 
+    def prefer_timeframe(self, time):
+        if time.timeframe in self.timeframe:
+            return 1
+        else:
+            return 0
+
+    def prefer_days_of_week(self, time):
+        if time.days_of_week in self.days_of_week:
+            return 1
+        else:
+            return 0
+
+
+
+def get_key(dict, value):
+    key = ''
+    for k, v in dict.items():
+        if v == value:
+            key = k
+            break
+    return key
 
 # get data from excel
 # read input, separate classes into sections
@@ -126,7 +166,16 @@ def read_input(input_file):
             course_name for course_name in course_names
             if prefer_tab[course_name][name] == 1
         )
-        professors[name] = Professor(name, max_units, capabilities, preferences)
+        timeframes = set(
+            t for t in TIMEFRAME
+            if prof_tab[t][name] == 1
+        )
+        days_of_week = set(
+            days for days in Time.Days_of_week
+            if prof_tab[days][name] == 1
+        )
+
+        professors[name] = Professor(name, max_units, capabilities, preferences, timeframes, days_of_week)
 
     sections = {}
     for course_name in course_names:
@@ -155,12 +204,14 @@ def read_input(input_file):
 
     # error checking
 
+    # it's better to not have all zeros for time slots preference
+
     # check that every course has at least one professor who can teach it
     for course_name in course_names:
         if not any(course_name in professor.capabilities for professor in professors.values()):
             raise ValueError('No professor can teach ' + course_name)
 
-    # check that the total number of units
+    # check the total number of units
     total_professor_units = sum(professor.max_units for professor in professors.values())
     total_course_units = sum(section.units for section in sections.values())
     print('Professors can teach', total_professor_units, 'units.')
@@ -179,7 +230,8 @@ def create_model(professors, sections, semesters):
     classes = {}
     for professor in professors.values():
         for section in sections.values():
-            classes[(professor.name, section.name)] = model.NewBoolVar('{} teaches {}'.format(professor.name, section.name))
+            classes[(professor.name, section.name)] = model.NewBoolVar(
+                '{} teaches {}'.format(professor.name, section.name))
 
     # hard constraints
 
@@ -215,8 +267,14 @@ def create_model(professors, sections, semesters):
     # soft constraints
 
     # assign classes according to prof preference
+    # maximize the number of sections offered
+    # can assign importance with coefficient
     model.Maximize(sum(
         classes[(prof_name, section_name)] * professor.prefers(section.course)
+        for prof_name, professor in professors.items()
+        for section_name, section in sections.items()
+    ) + sum(
+        classes[(prof_name, section_name)]
         for prof_name, professor in professors.items()
         for section_name, section in sections.items()
     ))
@@ -233,7 +291,6 @@ def solve_model(model):
 
 
 def print_results(solver, classes, professors, sections, semesters):
-
     # print in course-first format
     for semester in semesters:
         print(semester)
@@ -262,11 +319,12 @@ def print_results(solver, classes, professors, sections, semesters):
                     else:
                         print(professor.name + ' will be teaching ' + section.name + ' (not requested)')
         print()
-        
+
     # Statistics.
     print('Statistics')
     print('  - Number of requests met = %i' % solver.ObjectiveValue())
     print('  - wall time       : %f s' % solver.WallTime())
+    print()
 
 
 # return infos for timeslots scheduling
@@ -274,19 +332,19 @@ def print_results(solver, classes, professors, sections, semesters):
 def get_scheduled_classes(solver, classes, professors, sections, semesters):
     scheduled_classes = {}
     for semester in semesters:
-        profs_classeses = []
+        profs_classes = []
         for _, section in sections.items():
             if section.semester != semester:
                 continue
             for _, professor in professors.items():
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
-                    profs_classeses.append((professor.name, section.name))
+                    profs_classes.append((professor.name, section.name))
                     break
-        scheduled_classes[semester] = profs_classeses
+        scheduled_classes[semester] = profs_classes
     return scheduled_classes
 
 
-def create_timetable_model(profs_classes, times):
+def create_timetable_model(profs_classes, professors, times):
     prof_teach = {}  # professor to list of scheduled classes
     for prof_sec in profs_classes:
         prof = prof_sec[0]
@@ -323,7 +381,6 @@ def create_timetable_model(profs_classes, times):
                                        t1.conflicts[t2]]
                             model.AddMultiplicationEquality(0, content)
 
-
     # Minimize the overall time conflicts
     conflicts = {}
     conflict_name_template = 'course {} (timeslot {}) and course {} (timeslot {}) conflict'
@@ -339,32 +396,46 @@ def create_timetable_model(profs_classes, times):
                     key = (course1, time1, course2, time2)
                     # create the conflict variable
                     conflicts[key] = model.NewBoolVar(conflict_name_template.format(*key))
-                    # tell the model that (course1, time1) && (course2, time2) -> AND_VAR
                     model.Add(conflicts[key] == 1).OnlyEnforceIf([
                         time_assign[(course1, time1)],
                         time_assign[(course2, time2)],
                     ])
-    model.Minimize(sum(conflicts.values()))
 
-    # Assign according to prof preference - both hard and soft, preferences over general time periods
-    # (MWF/TR, morning/evening)
-    # create the conflict variable
+    # Maximize the number of time slots that profs prefer
+    # the importance of days of week and timeframe preferences are equal
+    prefer_time = {}
+    for prof_name, sec_name in prof_teach.items():
+        for s in sec_name:
+            for t in times:
+                key = (prof_name, s, t)
+                prefer_time[key] = model.NewIntVar(0, 2, prof_name + ' teaches '+ s + str(t.start) +
+                                                   str(t.end) + str(t.weekday) + t.days_of_week)
+                # model.AddHint(prefer_time[key], 0) # the value for prefer_time when c-t not scheduled?
+                model.Add(prefer_time[key] ==
+                          (professors[prof_name].prefer_days_of_week(t) +
+                           professors[prof_name].prefer_timeframe(t))).OnlyEnforceIf(
+                    [time_assign[((prof_name, s), t)]]
+                )
+
+    model.Minimize(sum(conflicts.values())
+                   - sum(prefer_time.values()))
 
     return model, time_assign
 
 
 # print the final timetable for one semester
 # professor, class name, start time, end time, weekday
-def print_timetable(solver, time_assign, times, profs_classes):
+def print_timetable(solver, time_assign, times, profs_classes, professors):
     for c in profs_classes:
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
-                print(c[0], c[1], t.start, t.end, t.weekday)
+                print(c[0], c[1], t.start, t.end, t.weekday,
+                      'Days of the week prefer:', professors[c[0]].prefer_days_of_week(t),
+                      'Timeframe prefer:', professors[c[0]].prefer_timeframe(t))
     print()
 
 
 def main():
-
     # switch input data order
     input_file = 'Testing data.xlsx'
 
@@ -380,9 +451,9 @@ def main():
 
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
-        model, time_assign = create_timetable_model(profs_classes, times)
+        model, time_assign = create_timetable_model(profs_classes, professors, times)
         solver = solve_model(model)
-        print_timetable(solver, time_assign, times, profs_classes)
+        print_timetable(solver, time_assign, times, profs_classes, professors)
 
 
 if __name__ == '__main__':
