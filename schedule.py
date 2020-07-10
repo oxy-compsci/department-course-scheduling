@@ -71,11 +71,9 @@ class Professor:
         print('can teach: ')
         for sec in self.capabilities:
             print(sec, end=' ')
-            print(self.capabilities[sec])
         print('prefer: ')
         for sec in self.preference:
             print(sec, end=' ')
-            print(self.preference[sec])
 
     def can_teach(self, course):
         if course in self.capabilities:
@@ -142,8 +140,7 @@ def read_input(input_file):
     times = []
     for _, rows in time_tab.iterrows():
         info = rows.tolist()
-        t = Time(info[5], info[6], info[0:5])
-        times.append(t)
+        times.append(Time(start=info[5], end=info[6], weekday=info[0:5]))
     for t in times:
         conflicts = {}
         for c in times:
@@ -184,7 +181,8 @@ def create_model(professors, sections, semesters):
     classes = {}
     for professor in professors.values():
         for section in sections.values():
-            classes[(professor.name, section.name)] = model.NewBoolVar('{} teaches {}'.format(professor.name, section.name))
+            classes[(professor.name, section.name)] = model.NewBoolVar(
+                '{} teaches {}'.format(professor.name, section.name))
 
     # hard constraints
 
@@ -250,7 +248,6 @@ def solve_model(model):
 
 
 def print_results(solver, classes, professors, sections, semesters):
-
     # print in course-first format
     for semester in semesters:
         print(semester)
@@ -284,22 +281,23 @@ def print_results(solver, classes, professors, sections, semesters):
     print('Statistics')
     print('  - Number of requests met = %i' % solver.ObjectiveValue())
     print('  - wall time       : %f s' % solver.WallTime())
+    print()
 
 
 # return infos for timeslots scheduling
 # list of scheduled classes tuple (professor.name, section.name) , listed by semesters
-def get_scheduled_classes(solver, classes, professors, sections, semesters):
+def get_semester_schedule(solver, classes, professors, sections, semesters):
     scheduled_classes = {}
     for semester in semesters:
-        profs_classeses = []
-        for _, section in sections.items():
+        profs_classes = []
+        for section in sections.values():
             if section.semester != semester:
                 continue
-            for _, professor in professors.items():
+            for professor in professors.values():
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
-                    profs_classeses.append((professor.name, section.name))
+                    profs_classes.append((professor.name, section.name))
                     break
-        scheduled_classes[semester] = profs_classeses
+        scheduled_classes[semester] = profs_classes
     return scheduled_classes
 
 
@@ -356,7 +354,6 @@ def create_timetable_model(profs_classes, times):
                     key = (course1, time1, course2, time2)
                     # create the conflict variable
                     conflicts[key] = model.NewBoolVar(conflict_name_template.format(*key))
-                    # tell the model that (course1, time1) && (course2, time2) -> AND_VAR
                     model.Add(conflicts[key] == 1).OnlyEnforceIf([
                         time_assign[(course1, time1)],
                         time_assign[(course2, time2)],
@@ -393,7 +390,7 @@ def main():
 
     print_results(solver, classes, professors, sections, semesters)
 
-    scheduled_classes = get_scheduled_classes(solver, classes, professors, sections, semesters)
+    scheduled_classes = get_semester_schedule(solver, classes, professors, sections, semesters)
 
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
