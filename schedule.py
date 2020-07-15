@@ -370,7 +370,7 @@ def create_timetable_model(profs_classes, times):
 
 # print the final timetable for one semester
 # professor, class name, start time, end time, weekday
-def print_timetable(solver, time_assign, times, profs_classes):
+def print_timetable(solver, time_assign, profs_classes, times):
     for c in profs_classes:
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
@@ -380,14 +380,21 @@ def print_timetable(solver, time_assign, times, profs_classes):
 
 # find more schedules by setting one variable
 # print the optimal ones with the same objective_value
-def find_all_schedule(model, variables, var1, var2, objective_value, print_schedule):
+# semester and error checking are for course assignment
+def find_all_schedule(model, variables, objective_value, print_schedule, var1, var2, semester=None):
     for c in var1:
         for t in var2:
             copies = copy.deepcopy(model)
             copies.Add(variables[(c, t)] == 1)
-            solver = solve_model(copies)
+            try:
+                solver = solve_model(copies)
+            except AssertionError as e:
+                continue
             if solver.ObjectiveValue() == objective_value:
-                print_schedule(solver, variables, var2, var1)
+                if semester is None:
+                    print_schedule(solver, variables, var1, var2)
+                else:
+                    print_schedule(solver, variables, var1, var2, semester)
 
 
 def main():
@@ -405,13 +412,15 @@ def main():
 
     scheduled_classes = get_semester_schedule(solver, classes, professors, sections, semesters)
 
+    # find_all_schedule(model, classes, solver.ObjectiveValue(), print_results, professors, sections, semesters)
+
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
         model, time_assign = create_timetable_model(profs_classes, times)
         solver = solve_model(model)
-        print_timetable(solver, time_assign, times, profs_classes)
+        print_timetable(solver, time_assign, profs_classes, times)
 
-        find_all_schedule(model, time_assign, profs_classes, times, solver.ObjectiveValue(), print_timetable)
+        # find_all_schedule(model, time_assign, solver.ObjectiveValue(), print_timetable, profs_classes, times)
 
 
 if __name__ == '__main__':
