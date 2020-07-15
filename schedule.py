@@ -1,5 +1,6 @@
 from ortools.sat.python import cp_model
 import pandas as pd
+import copy
 
 MAX_UNITS_PER_SEMESTER = 12
 
@@ -377,6 +378,18 @@ def print_timetable(solver, time_assign, times, profs_classes):
     print()
 
 
+# find more schedules by setting one variable
+# print the optimal ones with the same objective_value
+def find_all_schedule(model, variables, var1, var2, objective_value, print_schedule):
+    for c in var1:
+        for t in var2:
+            copies = copy.deepcopy(model)
+            copies.Add(variables[(c, t)] == 1)
+            solver = solve_model(copies)
+            if solver.ObjectiveValue() == objective_value:
+                print_schedule(solver, variables, var2, var1)
+
+
 def main():
 
     # switch input data order
@@ -397,6 +410,8 @@ def main():
         model, time_assign = create_timetable_model(profs_classes, times)
         solver = solve_model(model)
         print_timetable(solver, time_assign, times, profs_classes)
+
+        find_all_schedule(model, time_assign, profs_classes, times, solver.ObjectiveValue(), print_timetable)
 
 
 if __name__ == '__main__':
