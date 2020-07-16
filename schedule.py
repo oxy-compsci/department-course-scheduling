@@ -366,12 +366,12 @@ def create_timetable_model(profs_classes, professors, times):
     for prof_name, sec_name in prof_teach.items():
         for s1 in sec_name:
             for s2 in sec_name:
-                for t1 in times:
-                    for t2 in times:
-                        if s1 != s2:
-                            content = [time_assign[((prof_name, s1), t1)], time_assign[((prof_name, s2), t2)],
-                                       t1.conflicts[t2]]
-                            model.AddMultiplicationEquality(0, content)
+                if s1 != s2:
+                    for t1 in times:
+                        for t2 in times:
+                            if t1.conflicts[t2]:
+                                content = [time_assign[((prof_name, s1), t1)], time_assign[((prof_name, s2), t2)]]
+                                model.AddMultiplicationEquality(0, content)
 
     # Minimize the overall time conflicts
     conflicts = {}
@@ -400,8 +400,7 @@ def create_timetable_model(profs_classes, professors, times):
         for s in sec_name:
             for t in times:
                 key = (prof_name, s, t)
-                prefer_time[key] = model.NewBoolVar(prof_name + ' teaches ' + s + str(t.start) +
-                                                    str(t.end) + str(t.weekdays))
+                prefer_time[key] = model.NewBoolVar('{} teaches course {} on timeslots {}'.format(prof_name, s, t))
                 # model.AddHint(prefer_time[key], 0) # the value for prefer_time when c-t not scheduled?
                 model.Add(prefer_time[key] ==
                           (professors[prof_name].prefer_time(t))).OnlyEnforceIf(
@@ -421,7 +420,7 @@ def print_timetable(solver, time_assign, times, profs_classes, professors):
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
                 if professors[c[0]].prefer_time(t):
-                    print(c[0], c[1], t.start, t.end, t.weekdays,'Timeframe preferred')
+                    print(c[0], c[1], t.start, t.end, t.weekdays, 'Timeframe preferred')
                 else:
                     print(c[0], c[1], t.start, t.end, t.weekdays, 'Timeframe not preferred')
     print()
