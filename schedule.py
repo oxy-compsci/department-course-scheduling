@@ -1,26 +1,44 @@
 from ortools.sat.python import cp_model
 import pandas as pd
+import datetime
 
 MAX_UNITS_PER_SEMESTER = 12
+TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
 
 
 class Time:
+    Days_of_week = {'MWF': [1, 0, 1, 0, 1],
+                    'TR': [0, 1, 0, 1, 0],
+                    'MW': [1, 0, 1, 0, 0],
+                    'MTWRF': [1, 1, 1, 1, 1],
+                    'MF': [1, 0, 0, 0, 1],
+                    'WF': [0, 0, 1, 0, 1],
+                    'T': [0, 1, 0, 0, 0],
+                    'W': [0, 0, 1, 0, 0],
+                    'R': [0, 0, 0, 1, 0]}
 
-    def __init__(self, start, end, weekday):
+    def __init__(self, start, end, weekdays):
         self.start = start
         self.end = end
-        self.weekday = weekday
+        self.weekdays = weekdays
+        WEEKDAYS = 'MTWRF'
+        self.days_of_week = ''.join(day_str for day_str, day_bool in zip(WEEKDAYS, weekdays) if day_bool)
+        self.timeframe = 'Evening'
+        if self.start <= datetime.time(17, 0, 0):
+            self.timeframe = 'Afternoon'
+        if self.start <= datetime.time(12, 0, 0):
+            self.timeframe = 'Morning'
 
     def info(self):
         print('start:', self.start)
         print('end:', self.end)
-        print('weekday:', self.weekday)
+        print('weekdays:', self.weekdays)
 
     # check if conflicts with a time
     # return true if there is a conflict
     def conflict(self, time):
-        for day in range(len(self.weekday)):
-            if self.weekday[day] == 1 and time.weekday[day] == 1:
+        for day in range(len(self.weekdays)):
+            if self.weekdays[day] == 1 and time.weekdays[day] == 1:
                 if time.start <= self.start <= time.end:
                     return True
                 if time.start <= self.end <= time.end:
@@ -56,11 +74,12 @@ class Section:
 
 class Professor:
 
-    def __init__(self, name, max_units, capabilities, preference):
+    def __init__(self, name, max_units, capabilities, preference, prefer_timeframe):
         self.name = name
         self.max_units = max_units
         self.capabilities = capabilities
         self.preference = preference
+        self.prefer_timeframe = prefer_timeframe
 
     def __str__(self):
         return self.name
@@ -84,6 +103,15 @@ class Professor:
     def prefers(self, course):
         if course in self.preference:
             return 1
+        else:
+            return 0
+
+    def prefer_time(self, time):
+        if time.days_of_week in self.prefer_timeframe:
+            if time.timeframe in self.prefer_timeframe.get(time.days_of_week):
+                return 1
+            else:
+                return 0
         else:
             return 0
 
@@ -124,7 +152,12 @@ def read_input(input_file):
             course_name for course_name in course_names
             if prefer_tab[course_name][name] == 1
         )
-        professors[name] = Professor(name, max_units, capabilities, preferences)
+        days_of_week = {}
+        for days in Time.Days_of_week:
+            if prof_tab[days][name] is not None:
+                days_of_week[days] = str(prof_tab[days][name]).split(",")
+
+        professors[name] = Professor(name, max_units, capabilities, preferences, days_of_week)
 
     sections = {}
     for course_name in course_names:
@@ -140,7 +173,7 @@ def read_input(input_file):
     times = []
     for _, rows in time_tab.iterrows():
         info = rows.tolist()
-        times.append(Time(start=info[5], end=info[6], weekday=info[0:5]))
+        times.append(Time(start=info[5], end=info[6], weekdays=info[0:5]))
     for t in times:
         conflicts = {}
         for c in times:
@@ -151,6 +184,8 @@ def read_input(input_file):
         t.conflicts = conflicts
 
     # error checking
+
+    # for professors, it's better to not have all zeros for time slots preference
 
     # check that every course has at least one professor who can teach it
     for course_name in course_names:
@@ -276,7 +311,7 @@ def print_results(solver, classes, professors, sections, semesters):
                     else:
                         print(professor.name + ' will be teaching ' + section.name + ' (not requested)')
         print()
-        
+
     # Statistics.
     print('Statistics')
     print('  - Number of requests met = %i' % solver.ObjectiveValue())
@@ -301,7 +336,7 @@ def get_semester_schedule(solver, classes, professors, sections, semesters):
     return scheduled_classes
 
 
-def create_timetable_model(profs_classes, times):
+def create_timetable_model(profs_classes, professors, times):
     prof_teach = {}  # professor to list of scheduled classes
     for prof_sec in profs_classes:
         prof = prof_sec[0]
@@ -338,7 +373,6 @@ def create_timetable_model(profs_classes, times):
                                        t1.conflicts[t2]]
                             model.AddMultiplicationEquality(0, content)
 
-
     # Minimize the overall time conflicts
     conflicts = {}
     conflict_name_template = 'course {} (timeslot {}) and course {} (timeslot {}) conflict'
@@ -360,25 +394,40 @@ def create_timetable_model(profs_classes, times):
                     ])
     model.Minimize(sum(conflicts.values()))
 
-    # Assign according to prof preference - both hard and soft, preferences over general time periods
-    # (MWF/TR, morning/evening)
-    # create the conflict variable
+    # Maximize the number of time slots that profs prefer
+    prefer_time = {}
+    for prof_name, sec_name in prof_teach.items():
+        for s in sec_name:
+            for t in times:
+                key = (prof_name, s, t)
+                prefer_time[key] = model.NewBoolVar(prof_name + ' teaches ' + s + str(t.start) +
+                                                    str(t.end) + str(t.weekdays))
+                # model.AddHint(prefer_time[key], 0) # the value for prefer_time when c-t not scheduled?
+                model.Add(prefer_time[key] ==
+                          (professors[prof_name].prefer_time(t))).OnlyEnforceIf(
+                    [time_assign[((prof_name, s), t)]]
+                )
+
+    model.Minimize(sum(conflicts.values())
+                   - sum(prefer_time.values()))
 
     return model, time_assign
 
 
 # print the final timetable for one semester
-# professor, class name, start time, end time, weekday
-def print_timetable(solver, time_assign, times, profs_classes):
+# professor, class name, start time, end time, weekdays
+def print_timetable(solver, time_assign, times, profs_classes, professors):
     for c in profs_classes:
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
-                print(c[0], c[1], t.start, t.end, t.weekday)
+                if professors[c[0]].prefer_time(t):
+                    print(c[0], c[1], t.start, t.end, t.weekdays,'Timeframe preferred')
+                else:
+                    print(c[0], c[1], t.start, t.end, t.weekdays, 'Timeframe not preferred')
     print()
 
 
 def main():
-
     # switch input data order
     input_file = 'Testing data.xlsx'
 
@@ -394,9 +443,9 @@ def main():
 
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
-        model, time_assign = create_timetable_model(profs_classes, times)
+        model, time_assign = create_timetable_model(profs_classes, professors, times)
         solver = solve_model(model)
-        print_timetable(solver, time_assign, times, profs_classes)
+        print_timetable(solver, time_assign, times, profs_classes, professors)
 
 
 if __name__ == '__main__':
