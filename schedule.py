@@ -392,7 +392,6 @@ def create_timetable_model(profs_classes, professors, times):
                         time_assign[(course1, time1)],
                         time_assign[(course2, time2)],
                     ])
-    model.Minimize(sum(conflicts.values()))
 
     # Maximize the number of time slots that profs prefer
     prefer_time = {}
@@ -407,8 +406,9 @@ def create_timetable_model(profs_classes, professors, times):
                     [time_assign[((prof_name, s), t)]]
                 )
 
-    model.Minimize(sum(conflicts.values())
-                   - sum(prefer_time.values()))
+    # equalize their importance, then multiple their weights
+    model.Minimize(3 * len(prefer_time) * sum(conflicts.values())
+                   - 2 * len(conflicts) * sum(prefer_time.values()))
 
     return model, time_assign
 
