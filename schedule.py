@@ -21,6 +21,7 @@ class Time:
         self.start = start
         self.end = end
         self.weekdays = weekdays
+        self.conflicts = ()
         WEEKDAYS = 'MTWRF'
         self.days_of_week = ''.join(day_str for day_str, day_bool in zip(WEEKDAYS, weekdays) if day_bool)
         self.timeframe = 'Evening'
@@ -107,13 +108,7 @@ class Professor:
             return 0
 
     def prefer_time(self, time):
-        if time.days_of_week in self.prefer_timeframe:
-            if time.timeframe in self.prefer_timeframe.get(time.days_of_week):
-                return 1
-            else:
-                return 0
-        else:
-            return 0
+        return time.timeframe in self.prefer_timeframe.get(time.days_of_week, 0)
 
 
 # get data from excel
@@ -174,14 +169,9 @@ def read_input(input_file):
     for _, rows in time_tab.iterrows():
         info = rows.tolist()
         times.append(Time(start=info[5], end=info[6], weekdays=info[0:5]))
-    for t in times:
-        conflicts = {}
-        for c in times:
-            if t.conflict(c):
-                conflicts[c] = 1
-            else:
-                conflicts[c] = 0
-        t.conflicts = conflicts
+    for t1 in times:
+        conflicts = set(t2 for t2 in times if t1.conflict(t2))
+        t1.conflicts = conflicts
 
     # error checking
 
@@ -369,7 +359,7 @@ def create_timetable_model(profs_classes, professors, times):
                 if s1 != s2:
                     for t1 in times:
                         for t2 in times:
-                            if t1.conflicts[t2]:
+                            if t1 in t2.conflicts:
                                 content = [time_assign[((prof_name, s1), t1)], time_assign[((prof_name, s2), t2)]]
                                 model.AddMultiplicationEquality(0, content)
 
