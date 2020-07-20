@@ -130,13 +130,15 @@ def read_input(input_file):
     courses_okay = set(can_teach_tab.columns) == set(prefer_tab.columns) == set(course_tab.index)
     assert courses_okay, 'some courses are missing from some tabs!'
 
+    # get course names, prof names, and semester names
     course_names = set(can_teach_tab.columns)
     professor_names = set(can_teach_tab.index)
     semesters = course_tab.columns.tolist()
     semesters.remove('Unit')
     semesters.remove('UnitSum')
 
-    professors = {}
+    # create Professor objects for each prof
+    professors = {}  # {prof name : Professor}
     for name in professor_names:
         max_units = prof_tab['MaxUnit'][name]
         capabilities = set(
@@ -154,7 +156,8 @@ def read_input(input_file):
 
         professors[name] = Professor(name, max_units, capabilities, preferences, days_of_week)
 
-    sections = {}
+    # create Section objects for each section
+    sections = {}  # {section name : Section}
     for course_name in course_names:
         units = course_tab['Unit'][course_name]
         for semester in semesters:
@@ -163,8 +166,8 @@ def read_input(input_file):
                 section = Section(course_name, section_num, units, semester)
                 sections[section.name] = section
 
-    # create Time objects
-    # Time have start time, end time, list of 1/0 for weekdays, and list of conflicts with all time slots
+    # create Time objects for each time slots
+    # Time have start time, end time, list of 1/0 for weekdays, and a set of conflicted time slots
     times = []
     for _, rows in time_tab.iterrows():
         info = rows.tolist()
@@ -326,8 +329,9 @@ def get_semester_schedule(solver, classes, professors, sections, semesters):
     return scheduled_classes
 
 
+# create a model for timetable scheduling
 def create_timetable_model(profs_classes, professors, times):
-    prof_teach = {}  # professor to list of scheduled classes
+    prof_teach = {}  # professor : a list of scheduled classes
     for prof_sec in profs_classes:
         prof = prof_sec[0]
         sec = prof_sec[1]
@@ -384,19 +388,22 @@ def create_timetable_model(profs_classes, professors, times):
                     ])
 
     # Maximize the number of time slots that profs prefer
+    # should create a variable only if a professor prefers a time slot
+    # but the solver will schedule more classes that are not preferred
+    # so created a variable for all combination instead.
     prefer_time = {}
     for prof_name, sec_name in prof_teach.items():
         for s in sec_name:
             for t in times:
                 key = (prof_name, s, t)
+                # create the preferences variables
                 prefer_time[key] = model.NewBoolVar('{} teaches course {} on timeslots {}'.format(prof_name, s, t))
-                # model.AddHint(prefer_time[key], 0) # the value for prefer_time when c-t not scheduled?
                 model.Add(prefer_time[key] ==
                           (professors[prof_name].prefer_time(t))).OnlyEnforceIf(
                     [time_assign[((prof_name, s), t)]]
                 )
 
-    # equalize their importance, then multiple their weights
+    # equalize their importance, then multiple by their weights
     model.Minimize(3 * len(prefer_time) * sum(conflicts.values())
                    - 2 * len(conflicts) * sum(prefer_time.values()))
 
@@ -405,7 +412,7 @@ def create_timetable_model(profs_classes, professors, times):
 
 # print the final timetable for one semester
 # professor, class name, start time, end time, weekdays
-def print_timetable(solver, time_assign, times, profs_classes, professors):
+def print_semester_timetable(solver, time_assign, times, profs_classes, professors):
     for c in profs_classes:
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
@@ -417,24 +424,21 @@ def print_timetable(solver, time_assign, times, profs_classes, professors):
 
 
 def main():
-    # switch input data order
     input_file = 'Testing data.xlsx'
 
+    # schedule sections and print the result
     semesters, sections, professors, times = read_input(input_file)
-
     model, classes = create_model(professors, sections, semesters)
-
     solver = solve_model(model)
-
     print_results(solver, classes, professors, sections, semesters)
 
+    # timetable scheduling for each semester
     scheduled_classes = get_semester_schedule(solver, classes, professors, sections, semesters)
-
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
         model, time_assign = create_timetable_model(profs_classes, professors, times)
         solver = solve_model(model)
-        print_timetable(solver, time_assign, times, profs_classes, professors)
+        print_semester_timetable(solver, time_assign, times, profs_classes, professors)
 
 
 if __name__ == '__main__':
