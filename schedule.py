@@ -53,11 +53,12 @@ class Time:
 
 class Section:
 
-    def __init__(self, course, section, units, semester):
+    def __init__(self, course, section, units, semester, must_offer):
         self.course = course
         self.section = section
         self.units = units
         self.semester = semester
+        self.must_offer = must_offer
 
     def __str__(self):
         return self.name
@@ -134,7 +135,7 @@ def read_input(input_file):
     professor_names = set(can_teach_tab.index)
     semesters = course_tab.columns.tolist()
     semesters.remove('Unit')
-    semesters.remove('UnitSum')
+    semesters.remove('Must Offer')
 
     professors = {}
     for name in professor_names:
@@ -157,10 +158,11 @@ def read_input(input_file):
     sections = {}
     for course_name in course_names:
         units = course_tab['Unit'][course_name]
+        must_offer = course_tab['Must Offer'][course_name]
         for semester in semesters:
             num_sections = course_tab[semester][course_name]
             for section_num in range(num_sections):
-                section = Section(course_name, section_num, units, semester)
+                section = Section(course_name, section_num, units, semester, must_offer)
                 sections[section.name] = section
 
     # create Time objects
@@ -182,11 +184,18 @@ def read_input(input_file):
         if not any(course_name in professor.capabilities for professor in professors.values()):
             raise ValueError('No professor can teach ' + course_name)
 
-    # check the total number of units
+    # check if the required units are more than professors' total units
     total_professor_units = sum(professor.max_units for professor in professors.values())
-    total_course_units = sum(section.units for section in sections.values())
+    course_units_required = sum(section.units for section in sections.values() if section.must_offer)
+    course_units_optional = sum(section.units for section in sections.values() if not section.must_offer)
+    total_course_units = course_units_required + course_units_optional
+    if course_units_required > total_professor_units:
+        raise ValueError(course_units_required, 'are required, but professors can only teach',
+                         total_professor_units, 'units.')
+    # print out units information
     print('Professors can teach', total_professor_units, 'units.')
     print('There are', total_course_units, 'units form all classes.')
+    print(course_units_required, 'are required,', course_units_optional, 'are optional.')
 
     return semesters, sections, professors, times
 
@@ -207,12 +216,15 @@ def create_model(professors, sections, semesters):
     # hard constraints
 
     # Each class is assigned to one professor or no professor.
-    # allowing classes to not be assigned
-    for section_name in sections:
-        model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) <= 1)
+    # allow the optional classes to be not assigned
+    # schedule the courses that must be offered
+    for section_name, section in sections.items():
+        if section.must_offer:
+            model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) == 1)
+        else:
+            model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) <= 1)
 
     # Only schedule classes that professors can teach
-    # Constraint does not need variable?
     for prof_name, professor in professors.items():
         for section_name, section in sections.items():
             model.Add(professor.can_teach(section.course) == 1).OnlyEnforceIf(classes[(prof_name, section_name)])
@@ -265,9 +277,15 @@ def print_results(solver, classes, professors, sections, semesters):
             for _, professor in sorted(professors.items()):
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
                     if professor.prefers(section.course):
-                        print(section.name + ' assigned to ' + professor.name + ' (requested)')
+                        if section.must_offer:
+                            print(section.name + ' assigned to ' + professor.name + ' (required) (requested)')
+                        else:
+                            print(section.name + ' assigned to ' + professor.name + ' (optional) (requested)')
                     else:
-                        print(section.name + ' assigned to ' + professor.name + ' (not requested)')
+                        if section.must_offer:
+                            print(section.name + ' assigned to ' + professor.name + ' (required) (not requested)')
+                        else:
+                            print(section.name + ' assigned to ' + professor.name + ' (optional) (not requested)')
                     break
         print()
 
@@ -280,9 +298,15 @@ def print_results(solver, classes, professors, sections, semesters):
                     continue
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
                     if professor.prefers(section.course):
-                        print(professor.name + ' will be teaching ' + section.name + ' (requested)')
+                        if section.must_offer:
+                            print(professor.name + ' will be teaching ' + section.name + ' (required) (requested)')
+                        else:
+                            print(professor.name + ' will be teaching ' + section.name + ' (optional) (requested)')
                     else:
-                        print(professor.name + ' will be teaching ' + section.name + ' (not requested)')
+                        if section.must_offer:
+                            print(professor.name + ' will be teaching ' + section.name + ' (required) (not requested)')
+                        else:
+                            print(professor.name + ' will be teaching ' + section.name + ' (optional) (not requested)')
         print()
 
     # Statistics.
