@@ -1,6 +1,8 @@
 from ortools.sat.python import cp_model
 import pandas as pd
 import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 MAX_UNITS_PER_SEMESTER = 12
 TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
@@ -18,8 +20,8 @@ class Time:
                     'R': [0, 0, 0, 1, 0]}
 
     def __init__(self, start, end, weekdays):
-        self.start = start
-        self.end = end
+        self.start = datetime.datetime.strptime(start, '%H:%M:%S').time()
+        self.end = datetime.datetime.strptime(end, '%H:%M:%S').time()
         self.weekdays = weekdays
         self.conflicts = ()
         WEEKDAYS = 'MTWRF'
@@ -111,16 +113,25 @@ class Professor:
         return time.timeframe in self.prefer_timeframe.get(time.days_of_week, 0)
 
 
-# get data from excel
+# get data from google spreadsheet
 # read input, separate classes into sections
 # check for infeasible situation, and store info into objects
 def read_input(input_file):
-    # get data from excel
-    can_teach_tab = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
-    prefer_tab = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
-    course_tab = pd.read_excel(input_file, sheet_name='Course', index_col=0)
-    prof_tab = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
-    time_tab = pd.read_excel(input_file, sheet_name='Time', index_col=None)
+    # use creds to create a client to interact with the Google Drive API
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scopes)
+    client = gspread.authorize(creds)
+    # Open the sheets
+    sheets = client.open("Scheduling Info")
+    # get data from sheets
+    can_teach_tab = pd.DataFrame(sheets.worksheet('CanTeach').get_all_records()).set_index('')
+    prefer_tab = pd.DataFrame(sheets.worksheet('Prefer').get_all_records()).set_index('')
+    course_tab = pd.DataFrame(sheets.worksheet('Course').get_all_records()).set_index('')
+    prof_tab = pd.DataFrame(sheets.worksheet('Prof').get_all_records()).set_index('')
+    time_tab = pd.DataFrame(sheets.worksheet('Time').get_all_records())
 
     # check that the same professors are defined across all tabs
     professors_okay = set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index)
