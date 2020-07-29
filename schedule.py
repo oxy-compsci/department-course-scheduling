@@ -288,15 +288,9 @@ def print_results(solver, classes, professors, sections, semesters):
             for _, professor in sorted(professors.items()):
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
                     if professor.prefers(section.course):
-                        if section.must_offer:
-                            print(section.name + ' assigned to ' + professor.name + ' (required) (requested)')
-                        else:
-                            print(section.name + ' assigned to ' + professor.name + ' (optional) (requested)')
+                        print(section.name + ' assigned to ' + professor.name + ' (requested)')
                     else:
-                        if section.must_offer:
-                            print(section.name + ' assigned to ' + professor.name + ' (required) (not requested)')
-                        else:
-                            print(section.name + ' assigned to ' + professor.name + ' (optional) (not requested)')
+                        print(section.name + ' assigned to ' + professor.name + ' (not requested)')
                     break
         print()
 
@@ -309,15 +303,9 @@ def print_results(solver, classes, professors, sections, semesters):
                     continue
                 if solver.Value(classes[(professor.name, section.name)]) == 1:
                     if professor.prefers(section.course):
-                        if section.must_offer:
-                            print(professor.name + ' will be teaching ' + section.name + ' (required) (requested)')
-                        else:
-                            print(professor.name + ' will be teaching ' + section.name + ' (optional) (requested)')
+                        print(professor.name + ' will be teaching ' + section.name + ' (requested)')
                     else:
-                        if section.must_offer:
-                            print(professor.name + ' will be teaching ' + section.name + ' (required) (not requested)')
-                        else:
-                            print(professor.name + ' will be teaching ' + section.name + ' (optional) (not requested)')
+                        print(professor.name + ' will be teaching ' + section.name + ' (not requested)')
         print()
 
     # Statistics.
