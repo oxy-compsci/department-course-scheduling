@@ -4,6 +4,7 @@ import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+SHEETS_NAME = "Scheduling Info"
 MAX_UNITS_PER_SEMESTER = 12
 TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
 
@@ -114,9 +115,8 @@ class Professor:
 
 
 # get data from google spreadsheet
-# read input, separate classes into sections
-# check for infeasible situation, and store info into objects
-def read_input(input_file):
+# given the sheets name and the certificate file in directory
+def read_ggsheets(sheets_name):
     # use creds to create a client to interact with the Google Drive API
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
@@ -125,7 +125,13 @@ def read_input(input_file):
     creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scopes)
     client = gspread.authorize(creds)
     # Open the sheets
-    sheets = client.open("Scheduling Info")
+    sheets = client.open(sheets_name)
+    return sheets
+
+
+# read input, separate classes into sections
+# check for infeasible situation, and store info into objects
+def read_input(sheets):
     # get data from sheets
     can_teach_tab = pd.DataFrame(sheets.worksheet('CanTeach').get_all_records()).set_index('')
     prefer_tab = pd.DataFrame(sheets.worksheet('Prefer').get_all_records()).set_index('')
@@ -434,11 +440,10 @@ def print_semester_timetable(solver, time_assign, times, profs_classes, professo
     print()
 
 
-def main():
-    input_file = 'Testing data.xlsx'
-
+def main(sheets_name):
     # schedule sections and print the result
-    semesters, sections, professors, times = read_input(input_file)
+    sheets = read_ggsheets(sheets_name)
+    semesters, sections, professors, times = read_input(sheets)
     model, classes = create_model(professors, sections, semesters)
     solver = solve_model(model)
     print_results(solver, classes, professors, sections, semesters)
@@ -453,4 +458,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main(SHEETS_NAME)
