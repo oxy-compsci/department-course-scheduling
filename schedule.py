@@ -135,7 +135,12 @@ def read_input(input_file):
     professor_names = set(can_teach_tab.index)
     semesters = course_tab.columns.tolist()
     semesters.remove('Unit')
-    semesters.remove('Must Offer')
+    for s in semesters:
+        if "MustOffer" in s:
+            semesters.remove(s)
+        # check that all semesters have a MustOffer tab
+        elif s + "_MustOffer" not in course_tab.columns.tolist():
+            raise ValueError(s, 'semester does not have its corresponding MustOffer tab')
 
     professors = {}
     for name in professor_names:
@@ -158,12 +163,18 @@ def read_input(input_file):
     sections = {}
     for course_name in course_names:
         units = course_tab['Unit'][course_name]
-        must_offer = course_tab['Must Offer'][course_name]
         for semester in semesters:
             num_sections = course_tab[semester][course_name]
-            for section_num in range(num_sections):
-                section = Section(course_name, section_num, units, semester, must_offer)
+            must_offer = course_tab[semester + '_MustOffer'][course_name]
+            section_num = 0
+            for must in range(must_offer):
+                section = Section(course_name, section_num, units, semester, must_offer=1)
                 sections[section.name] = section
+                section_num = section_num + 1
+            for optional in range(num_sections - must_offer):
+                section = Section(course_name, section_num, units, semester, must_offer=0)
+                sections[section.name] = section
+                section_num = section_num + 1
 
     # create Time objects
     # Time have start time, end time, list of 1/0 for weekdays, and list of conflicts with all time slots
