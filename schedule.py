@@ -4,7 +4,7 @@ import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-SHEETS_NAME = "Scheduling Info"
+SHEETS_URL = "https://docs.google.com/spreadsheets/d/112IxSjwhCQmKnJdwn_UebT_lEW5CR2Q3GMzeaFJuNBg/edit?usp=sharing"
 MAX_UNITS_PER_SEMESTER = 12
 TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
 
@@ -116,7 +116,7 @@ class Professor:
 
 # get data from google spreadsheet
 # given the sheets name and the certificate file in directory
-def read_ggsheets(sheets_name):
+def read_ggsheets(sheets_url):
     # use creds to create a client to interact with the Google Drive API
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
@@ -125,7 +125,7 @@ def read_ggsheets(sheets_name):
     creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scopes)
     client = gspread.authorize(creds)
     # Open the sheets
-    sheets = client.open(sheets_name)
+    sheets = client.open_by_url(sheets_url)
     return sheets
 
 
@@ -440,9 +440,9 @@ def print_semester_timetable(solver, time_assign, times, profs_classes, professo
     print()
 
 
-def main(sheets_name):
+def main(sheets_url):
     # schedule sections and print the result
-    sheets = read_ggsheets(sheets_name)
+    sheets = read_ggsheets(sheets_url)
     semesters, sections, professors, times = read_input(sheets)
     model, classes = create_model(professors, sections, semesters)
     solver = solve_model(model)
@@ -458,4 +458,4 @@ def main(sheets_name):
 
 
 if __name__ == '__main__':
-    main(SHEETS_NAME)
+    main(SHEETS_URL)
