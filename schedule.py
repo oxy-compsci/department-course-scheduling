@@ -1,6 +1,7 @@
 from ortools.sat.python import cp_model
 import pandas as pd
 import datetime
+import copy
 
 MAX_UNITS_PER_SEMESTER = 12
 TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
@@ -412,7 +413,7 @@ def create_timetable_model(profs_classes, professors, times):
 
 # print the final timetable for one semester
 # professor, class name, start time, end time, weekdays
-def print_semester_timetable(solver, time_assign, times, profs_classes, professors):
+def print_semester_timetable(solver, time_assign, profs_classes, times, professors):
     for c in profs_classes:
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
@@ -421,6 +422,28 @@ def print_semester_timetable(solver, time_assign, times, profs_classes, professo
                 else:
                     print(c[0], c[1], t.start, t.end, t.weekdays, 'Timeframe not preferred')
     print()
+
+
+# find more schedules by setting one variable
+# return ones with the optimal objective_value
+def find_all_schedule(model, variables):
+    # find the optimal objective value by solving unrestricted variables first
+    optimal_copy = copy.deepcopy(model)
+    solver = solve_model(optimal_copy)
+    optimal_value = solver.ObjectiveValue()
+
+    solutions = []
+    for var in variables:
+        copies = copy.deepcopy(model)
+        copies.Add(variables[var] == 1)
+        # skip if it's infeasible
+        try:
+            solver = solve_model(copies)
+        except AssertionError as e:
+            continue
+        if solver.ObjectiveValue() == optimal_value:
+            solutions.append(solver)
+    return solutions
 
 
 def main():
@@ -434,11 +457,12 @@ def main():
 
     # timetable scheduling for each semester
     scheduled_classes = get_semester_schedule(solver, classes, professors, sections, semesters)
+
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
         model, time_assign = create_timetable_model(profs_classes, professors, times)
         solver = solve_model(model)
-        print_semester_timetable(solver, time_assign, times, profs_classes, professors)
+        print_semester_timetable(solver, time_assign, profs_classes, times, professors)
 
 
 if __name__ == '__main__':
