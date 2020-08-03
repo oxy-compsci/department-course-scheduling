@@ -1,7 +1,11 @@
 from ortools.sat.python import cp_model
 import pandas as pd
 import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import copy
 
+SHEETS_URL = "https://docs.google.com/spreadsheets/d/112IxSjwhCQmKnJdwn_UebT_lEW5CR2Q3GMzeaFJuNBg/edit?usp=sharing"
 MAX_UNITS_PER_SEMESTER = 12
 TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
 
@@ -18,8 +22,8 @@ class Time:
                     'R': [0, 0, 0, 1, 0]}
 
     def __init__(self, start, end, weekdays):
-        self.start = start
-        self.end = end
+        self.start = datetime.datetime.strptime(start, '%H:%M:%S').time()
+        self.end = datetime.datetime.strptime(end, '%H:%M:%S').time()
         self.weekdays = weekdays
         self.conflicts = ()
         WEEKDAYS = 'MTWRF'
@@ -53,11 +57,12 @@ class Time:
 
 class Section:
 
-    def __init__(self, course, section, units, semester):
+    def __init__(self, course, section, units, semester, must_offer):
         self.course = course
         self.section = section
         self.units = units
         self.semester = semester
+        self.must_offer = must_offer
 
     def __str__(self):
         return self.name
@@ -111,16 +116,30 @@ class Professor:
         return time.timeframe in self.prefer_timeframe.get(time.days_of_week, 0)
 
 
-# get data from excel
+# get data from google spreadsheet
+# given the sheets name and the certificate file in directory
+def read_ggsheets(sheets_url):
+    # use creds to create a client to interact with the Google Drive API
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scopes)
+    client = gspread.authorize(creds)
+    # Open the sheets
+    sheets = client.open_by_url(sheets_url)
+    return sheets
+
+
 # read input, separate classes into sections
 # check for infeasible situation, and store info into objects
-def read_input(input_file):
-    # get data from excel
-    can_teach_tab = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
-    prefer_tab = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
-    course_tab = pd.read_excel(input_file, sheet_name='Course', index_col=0)
-    prof_tab = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
-    time_tab = pd.read_excel(input_file, sheet_name='Time', index_col=None)
+def read_input(sheets):
+    # get data from sheets
+    can_teach_tab = pd.DataFrame(sheets.worksheet('CanTeach').get_all_records()).set_index('')
+    prefer_tab = pd.DataFrame(sheets.worksheet('Prefer').get_all_records()).set_index('')
+    course_tab = pd.DataFrame(sheets.worksheet('Course').get_all_records()).set_index('')
+    prof_tab = pd.DataFrame(sheets.worksheet('Prof').get_all_records()).set_index('')
+    time_tab = pd.DataFrame(sheets.worksheet('Time').get_all_records())
 
     # check that the same professors are defined across all tabs
     professors_okay = set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index)
@@ -135,7 +154,12 @@ def read_input(input_file):
     professor_names = set(can_teach_tab.index)
     semesters = course_tab.columns.tolist()
     semesters.remove('Unit')
-    semesters.remove('UnitSum')
+    for s in semesters:
+        if "MustOffer" in s:
+            semesters.remove(s)
+        # check that all semesters have a MustOffer tab
+        elif s + "_MustOffer" not in course_tab.columns.tolist():
+            raise ValueError(s, 'semester does not have its corresponding MustOffer tab')
 
     # create Professor objects for each prof
     professors = {}  # {prof name : Professor}
@@ -162,9 +186,16 @@ def read_input(input_file):
         units = course_tab['Unit'][course_name]
         for semester in semesters:
             num_sections = course_tab[semester][course_name]
-            for section_num in range(num_sections):
-                section = Section(course_name, section_num, units, semester)
+            must_offer = course_tab[semester + '_MustOffer'][course_name]
+            section_num = 0
+            for must in range(must_offer):
+                section = Section(course_name, section_num, units, semester, must_offer=1)
                 sections[section.name] = section
+                section_num = section_num + 1
+            for optional in range(num_sections - must_offer):
+                section = Section(course_name, section_num, units, semester, must_offer=0)
+                sections[section.name] = section
+                section_num = section_num + 1
 
     # create Time objects for each time slots
     # Time have start time, end time, list of 1/0 for weekdays, and a set of conflicted time slots
@@ -185,16 +216,18 @@ def read_input(input_file):
         if not any(course_name in professor.capabilities for professor in professors.values()):
             raise ValueError('No professor can teach ' + course_name)
 
-    # check that the total number of units from professors is enough
-    # TODO this may not be true in the future, if we just through all available courses into the solver
-    # put in all available courses and select ones with professor preference/set if the course must be offered
+    # check if the required units are more than professors' total units
     total_professor_units = sum(professor.max_units for professor in professors.values())
-    total_course_units = sum(section.units for section in sections.values())
-    if total_course_units > total_professor_units:
-        raise ValueError('Professors can only teach {} units but there are {} course units total'.format(
-            total_professor_units,
-            total_course_units,
-        ))
+    course_units_required = sum(section.units for section in sections.values() if section.must_offer)
+    course_units_optional = sum(section.units for section in sections.values() if not section.must_offer)
+    total_course_units = course_units_required + course_units_optional
+    if course_units_required > total_professor_units:
+        raise ValueError(course_units_required, 'are required, but professors can only teach',
+                         total_professor_units, 'units.')
+    # print out units information
+    print('Professors can teach', total_professor_units, 'units.')
+    print('There are', total_course_units, 'units form all classes.')
+    print(course_units_required, 'are required,', course_units_optional, 'are optional.')
 
     return semesters, sections, professors, times
 
@@ -214,28 +247,19 @@ def create_model(professors, sections, semesters):
 
     # hard constraints
 
-    # All sections must be assigned
-    # TODO this may not be true in the future, if we just through all available courses into the solver
-    model.Add(
-        sum(
-            classes[(prof_name, section_name)]
-            for prof_name in professors
-            for section_name in sections
-        ) == len(sections)
-    )
-
-    # Each class is assigned to exactly one professor.
-    for section_name in sections:
-        model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) == 1)
+    # Each class is assigned to one professor or no professor.
+    # allow the optional classes to be not assigned
+    # schedule the courses that must be offered
+    for section_name, section in sections.items():
+        if section.must_offer:
+            model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) == 1)
+        else:
+            model.Add(sum(classes[(prof_name, section_name)] for prof_name in professors) <= 1)
 
     # Only schedule classes that professors can teach
-    model.Add(
-        sum(
-            classes[(prof_name, section_name)] * professor.can_teach(section.course)
-            for prof_name, professor in professors.items()
-            for section_name, section in sections.items()
-        ) == len(sections)
-    )
+    for prof_name, professor in professors.items():
+        for section_name, section in sections.items():
+            model.Add(professor.can_teach(section.course) == 1).OnlyEnforceIf(classes[(prof_name, section_name)])
 
     # Professors cannot teach more than their max number of units
     # 12 units per semester max
@@ -412,7 +436,7 @@ def create_timetable_model(profs_classes, professors, times):
 
 # print the final timetable for one semester
 # professor, class name, start time, end time, weekdays
-def print_semester_timetable(solver, time_assign, times, profs_classes, professors):
+def print_semester_timetable(solver, time_assign, profs_classes, times, professors):
     for c in profs_classes:
         for t in times:
             if solver.Value(time_assign[(c, t)]) == 1:
@@ -423,23 +447,45 @@ def print_semester_timetable(solver, time_assign, times, profs_classes, professo
     print()
 
 
-def main():
-    input_file = 'Testing data.xlsx'
+# find more schedules by setting one variable
+# return ones with the optimal objective_value
+def find_all_schedule(model, variables):
+    # find the optimal objective value by solving unrestricted variables first
+    optimal_copy = copy.deepcopy(model)
+    solver = solve_model(optimal_copy)
+    optimal_value = solver.ObjectiveValue()
 
+    solutions = []
+    for var in variables:
+        copies = copy.deepcopy(model)
+        copies.Add(variables[var] == 1)
+        # skip if it's infeasible
+        try:
+            solver = solve_model(copies)
+        except AssertionError as e:
+            continue
+        if solver.ObjectiveValue() == optimal_value:
+            solutions.append(solver)
+    return solutions
+
+
+def main(sheets_url):
     # schedule sections and print the result
-    semesters, sections, professors, times = read_input(input_file)
+    sheets = read_ggsheets(sheets_url)
+    semesters, sections, professors, times = read_input(sheets)
     model, classes = create_model(professors, sections, semesters)
     solver = solve_model(model)
     print_results(solver, classes, professors, sections, semesters)
 
     # timetable scheduling for each semester
     scheduled_classes = get_semester_schedule(solver, classes, professors, sections, semesters)
+
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
         model, time_assign = create_timetable_model(profs_classes, professors, times)
         solver = solve_model(model)
-        print_semester_timetable(solver, time_assign, times, profs_classes, professors)
+        print_semester_timetable(solver, time_assign, profs_classes, times, professors)
 
 
 if __name__ == '__main__':
-    main()
+    main(SHEETS_URL)
