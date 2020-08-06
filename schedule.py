@@ -21,10 +21,11 @@ class Time:
                     'W': [0, 0, 1, 0, 0],
                     'R': [0, 0, 0, 1, 0]}
 
-    def __init__(self, start, end, weekdays):
+    def __init__(self, start, end, weekdays, lab):
         self.start = datetime.datetime.strptime(start, '%H:%M:%S').time()
         self.end = datetime.datetime.strptime(end, '%H:%M:%S').time()
         self.weekdays = weekdays
+        self.lab = lab
         self.conflicts = ()
         WEEKDAYS = 'MTWRF'
         self.days_of_week = ''.join(day_str for day_str, day_bool in zip(WEEKDAYS, weekdays) if day_bool)
@@ -57,12 +58,13 @@ class Time:
 
 class Section:
 
-    def __init__(self, course, section, units, semester, must_offer):
+    def __init__(self, course, section, units, semester, must_offer, lab):
         self.course = course
         self.section = section
         self.units = units
         self.semester = semester
         self.must_offer = must_offer
+        self.lab = lab
 
     def __str__(self):
         return self.name
@@ -113,7 +115,7 @@ class Professor:
             return 0
 
     def prefer_time(self, time):
-        return time.timeframe in self.prefer_timeframe.get(time.days_of_week, 0)
+        return time.timeframe in self.prefer_timeframe.get(time.days_of_week, [])
 
 
 # get data from google spreadsheet
@@ -154,6 +156,7 @@ def read_input(sheets):
     professor_names = set(can_teach_tab.index)
     semesters = course_tab.columns.tolist()
     semesters.remove('Unit')
+    semesters.remove('Lab')
     for s in semesters:
         if "MustOffer" in s:
             semesters.remove(s)
@@ -184,16 +187,17 @@ def read_input(sheets):
     sections = {}  # {section name : Section}
     for course_name in course_names:
         units = course_tab['Unit'][course_name]
+        lab = course_tab['Lab'][course_name]
         for semester in semesters:
             num_sections = course_tab[semester][course_name]
             must_offer = course_tab[semester + '_MustOffer'][course_name]
             section_num = 0
             for must in range(must_offer):
-                section = Section(course_name, section_num, units, semester, must_offer=1)
+                section = Section(course_name, section_num, units, semester, must_offer=1, lab=lab)
                 sections[section.name] = section
                 section_num = section_num + 1
             for optional in range(num_sections - must_offer):
-                section = Section(course_name, section_num, units, semester, must_offer=0)
+                section = Section(course_name, section_num, units, semester, must_offer=0, lab=lab)
                 sections[section.name] = section
                 section_num = section_num + 1
 
@@ -202,7 +206,7 @@ def read_input(sheets):
     times = []
     for _, rows in time_tab.iterrows():
         info = rows.tolist()
-        times.append(Time(start=info[5], end=info[6], weekdays=info[0:5]))
+        times.append(Time(start=info[5], end=info[6], weekdays=info[0:5], lab=info[7]))
     for t1 in times:
         conflicts = set(t2 for t2 in times if t1.conflict(t2))
         t1.conflicts = conflicts
@@ -354,7 +358,7 @@ def get_semester_schedule(solver, classes, professors, sections, semesters):
 
 
 # create a model for timetable scheduling
-def create_timetable_model(profs_classes, professors, times):
+def create_timetable_model(profs_classes, professors, sections, times):
     prof_teach = {}  # professor : a list of scheduled classes
     for prof_sec in profs_classes:
         prof = prof_sec[0]
@@ -379,6 +383,23 @@ def create_timetable_model(profs_classes, professors, times):
     # Each class is assigned to exactly one time slot.
     for c in profs_classes:
         model.Add(sum(time_assign[(c, t)] for t in times) == 1)
+
+    # only lab sections are assign to lab time slots
+    is_lab = {}
+    for prof_name, sec_name in prof_teach.items():
+        for s in sec_name:
+            for t in times:
+                # create intermediate boolean variables
+                lab_key = (s, t)
+                is_lab[lab_key] = model.NewBoolVar(
+                    '{} section lab {}, timeslots {} lab {}'.format(s, sections[s].lab, t, t.lab))
+                # variables are true when both the section and time are labs
+                # or when both are not labs
+                if sections[s].lab == t.lab:
+                    model.Add(is_lab[lab_key] == 1)
+                else:
+                    model.Add(is_lab[lab_key] == 0)
+                model.Add(is_lab[lab_key] == 1).OnlyEnforceIf(time_assign[(prof_name, s), t])
 
     # time slots for a professor don't conflict
     for prof_name, sec_name in prof_teach.items():
@@ -482,7 +503,7 @@ def main(sheets_url):
 
     for semester in semesters:
         profs_classes = scheduled_classes[semester]  # list of (professor.name, section.name)
-        model, time_assign = create_timetable_model(profs_classes, professors, times)
+        model, time_assign = create_timetable_model(profs_classes, professors, sections, times)
         solver = solve_model(model)
         print_semester_timetable(solver, time_assign, profs_classes, times, professors)
 
