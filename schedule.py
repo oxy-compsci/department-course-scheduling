@@ -6,6 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import copy
 
 SHEETS_URL = "https://docs.google.com/spreadsheets/d/112IxSjwhCQmKnJdwn_UebT_lEW5CR2Q3GMzeaFJuNBg/edit?usp=sharing"
+EXCEL_NAME = 'Testing data.xlsx'
 MAX_UNITS_PER_SEMESTER = 12
 TIMEFRAME = ['Morning', 'Afternoon', 'Evening']
 
@@ -130,6 +131,25 @@ def read_ggsheets(sheets_url):
     client = gspread.authorize(creds)
     # Open the sheets
     sheets = client.open_by_url(sheets_url)
+
+    can_teach_tab = pd.DataFrame(sheets.worksheet('CanTeach').get_all_records()).set_index('')
+    prefer_tab = pd.DataFrame(sheets.worksheet('Prefer').get_all_records()).set_index('')
+    course_tab = pd.DataFrame(sheets.worksheet('Course').get_all_records()).set_index('')
+    prof_tab = pd.DataFrame(sheets.worksheet('Prof').get_all_records()).set_index('')
+    time_tab = pd.DataFrame(sheets.worksheet('Time').get_all_records())
+    sheets = [can_teach_tab, prefer_tab, course_tab, prof_tab, time_tab]
+    return sheets
+
+
+# get data from excel
+# given the excel name
+def read_excel(input_file):
+    can_teach_tab = pd.read_excel(input_file, sheet_name='CanTeach', index_col=0)
+    prefer_tab = pd.read_excel(input_file, sheet_name='Prefer', index_col=0)
+    course_tab = pd.read_excel(input_file, sheet_name='Course', index_col=0)
+    prof_tab = pd.read_excel(input_file, sheet_name='Prof', index_col=0)
+    time_tab = pd.read_excel(input_file, sheet_name='Time', index_col=None)
+    sheets = [can_teach_tab, prefer_tab, course_tab, prof_tab, time_tab]
     return sheets
 
 
@@ -137,11 +157,7 @@ def read_ggsheets(sheets_url):
 # check for infeasible situation, and store info into objects
 def read_input(sheets):
     # get data from sheets
-    can_teach_tab = pd.DataFrame(sheets.worksheet('CanTeach').get_all_records()).set_index('')
-    prefer_tab = pd.DataFrame(sheets.worksheet('Prefer').get_all_records()).set_index('')
-    course_tab = pd.DataFrame(sheets.worksheet('Course').get_all_records()).set_index('')
-    prof_tab = pd.DataFrame(sheets.worksheet('Prof').get_all_records()).set_index('')
-    time_tab = pd.DataFrame(sheets.worksheet('Time').get_all_records())
+    can_teach_tab, prefer_tab, course_tab, prof_tab, time_tab = sheets
 
     # check that the same professors are defined across all tabs
     professors_okay = set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index)
@@ -490,9 +506,12 @@ def find_all_schedule(model, variables):
     return solutions
 
 
-def main(sheets_url):
+def main(sheets_source):
     # schedule sections and print the result
-    sheets = read_ggsheets(sheets_url)
+    if sheets_source.startswith('http'):
+        sheets = read_ggsheets(sheets_source)
+    else:
+        sheets = read_excel(sheets_source)
     semesters, sections, professors, times = read_input(sheets)
     model, classes = create_model(professors, sections, semesters)
     solver = solve_model(model)
