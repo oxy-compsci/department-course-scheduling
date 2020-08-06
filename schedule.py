@@ -155,11 +155,7 @@ def read_excel(input_file):
 # check for infeasible situation, and store info into objects
 def read_input(sheets):
     # get data from sheets
-    can_teach_tab = sheets[0]
-    prefer_tab = sheets[1]
-    course_tab = sheets[2]
-    prof_tab = sheets[3]
-    time_tab = sheets[4]
+    can_teach_tab, prefer_tab, course_tab, prof_tab, time_tab = sheets
 
     # check that the same professors are defined across all tabs
     professors_okay = set(can_teach_tab.index) == set(prefer_tab.index) == set(prof_tab.index)
@@ -491,8 +487,10 @@ def find_all_schedule(model, variables):
 
 def main(sheets_source):
     # schedule sections and print the result
-    sheets = read_ggsheets(sheets_source)
-    # sheets = read_excel(sheets_source)
+    if sheets_source.startswith('http'):
+        sheets = read_ggsheets(sheets_source)
+    else:
+        sheets = read_excel(sheets_source)
     semesters, sections, professors, times = read_input(sheets)
     model, classes = create_model(professors, sections, semesters)
     solver = solve_model(model)
